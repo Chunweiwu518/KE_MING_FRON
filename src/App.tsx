@@ -551,14 +551,15 @@ function App() {
             {messages.length > 0 && 
               messages[messages.length - 1].role === 'assistant' && 
               messages[messages.length - 1].sources && 
+              Array.isArray(messages[messages.length - 1].sources) && 
               messages[messages.length - 1].sources.length > 0 && (
               <div className="max-w-3xl mx-auto mt-2">
                 <details className="bg-gray-50 rounded-lg border border-gray-200">
                   <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
-                    查看引用來源 ({messages[messages.length - 1].sources.length})
+                    查看引用來源 ({messages[messages.length - 1].sources?.length || 0})
                   </summary>
                   <div className="p-4 space-y-3">
-                    {messages[messages.length - 1].sources.map((source, sourceIndex) => (
+                    {messages[messages.length - 1].sources?.map((source, sourceIndex) => (
                       <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-gray-700 font-medium">
