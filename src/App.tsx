@@ -7,6 +7,13 @@ interface Source {
     source: string
     page?: number
   }
+  images?: {
+    [key: string]: {
+      path: string
+      page: number
+    }
+  }
+  page_info?: string
 }
 
 interface Message {
@@ -45,6 +52,7 @@ function App() {
     files: [],
     is_empty: true
   })
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   // 載入歷史對話
   useEffect(() => {
@@ -88,41 +96,70 @@ function App() {
       content: input.trim()
     }
 
-    setMessages(prev => [...prev, newMessage])
-    setInput('')
-    setIsLoading(true)
-    setError(null)
-
     try {
+      // 先更新用戶消息
+      setMessages(prev => [...prev, newMessage])
+      setInput('')
+      setIsLoading(true)
+      setError(null)
+
+      console.log('Sending request to:', `${API_URL}/api/chat`)
+      console.log('Request payload:', {
+        query: input.trim(),
+        history: messages
+      })
+
       const response = await axios.post(`${API_URL}/api/chat`, {
         query: input.trim(),
         history: messages
       })
 
+      console.log('Response received:', response.data)
+
+      // 檢查響應數據的格式
+      if (!response.data || typeof response.data.answer === 'undefined') {
+        throw new Error('Invalid response format from server')
+      }
+
       const assistantMessage: Message = {
         role: 'assistant',
         content: response.data.answer,
-        sources: response.data.sources
+        sources: response.data.sources || []
       }
 
-      const updatedMessages = [...messages, newMessage, assistantMessage]
-      setMessages(updatedMessages)
+      // 使用函數式更新確保狀態更新正確
+      setMessages(prevMessages => [...prevMessages, assistantMessage])
 
       // 保存對話
       if (!currentChatId) {
-        const historyResponse = await axios.post(`${API_URL}/api/history`, {
-          messages: updatedMessages,
-          title: input.trim().slice(0, 20) + "..."
-        })
-        setCurrentChatId(historyResponse.data.id)
-        await fetchChatHistories() // 重新獲取對話列表
+        try {
+          const saveResponse = await axios.post(`${API_URL}/api/history`, {
+            messages: [...messages, newMessage, assistantMessage]
+          })
+          setCurrentChatId(saveResponse.data.id)
+          fetchChatHistories()
+        } catch (error) {
+          console.error('Failed to save chat history:', error)
+        }
+      } else {
+        try {
+          await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+            messages: [...messages, newMessage, assistantMessage]
+          })
+          fetchChatHistories()
+        } catch (error) {
+          console.error('Failed to update chat history:', error)
+        }
       }
+
     } catch (error) {
       console.error('Chat error:', error)
+      // 回滾消息狀態
+      setMessages(prev => prev.slice(0, -1))
       if (axios.isAxiosError(error)) {
-        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
+        setError(error.response?.data?.detail || '請求失敗，請稍後再試')
       } else {
-        setError('發送訊息時發生未知錯誤')
+        setError('發生未知錯誤，請稍後再試')
       }
     } finally {
       setIsLoading(false)
@@ -321,6 +358,86 @@ function App() {
     loadVectorStoreStats()
   }, [files]) // 當文件列表變化時重新加載
 
+  // 修改消息渲染部分
+  const renderMessage = (message: Message) => {
+    // 獲取所有相關圖片
+    const getAllImages = () => {
+      if (!message.sources) return [];
+      const images: Array<{key: string; path: string; page: number}> = [];
+      message.sources.forEach(source => {
+        if (source.images) {
+          Object.entries(source.images).forEach(([key, image]) => {
+            images.push({
+              key,
+              path: image.path,
+              page: image.page
+            });
+          });
+        }
+      });
+      return images;
+    };
+
+    const images = getAllImages();
+
+    return (
+      <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+        <div
+          className={`max-w-[80%] rounded-lg p-4 ${
+            message.role === 'user'
+              ? 'bg-purple-500 text-white ml-auto rounded-br-none'
+              : 'bg-gray-100 text-gray-800 mr-auto rounded-bl-none'
+          }`}
+        >
+          {/* 消息內容 */}
+          <div className="whitespace-pre-wrap mb-2">{message.content}</div>
+
+          {/* 圖片顯示 */}
+          {message.role === 'assistant' && (
+            <div className="mt-4">
+              {images.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {images.map((image, index) => (
+                    <div
+                      key={image.key}
+                      className="relative cursor-pointer"
+                      onClick={() => setSelectedImage(image.path)}
+                    >
+                      <img
+                        src={`${API_URL}${image.path}`}
+                        alt={`Product image ${index + 1}`}
+                        className="w-full h-32 object-contain rounded-lg hover:opacity-90 transition-opacity border border-gray-200"
+                      />
+                      <div className="absolute bottom-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                        頁碼: {image.page}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {/* 來源信息 */}
+          {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+            <details className="mt-2">
+              <summary className="text-sm text-gray-500 cursor-pointer hover:text-gray-700">
+                查看來源
+              </summary>
+              <div className="mt-2 text-sm text-gray-600">
+                {message.sources.map((source, index) => (
+                  <div key={index} className="mb-2 p-2 bg-white rounded">
+                    <div>{source.content}</div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-white">
       {/* 側邊欄 */}
@@ -358,7 +475,7 @@ function App() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                 </svg>
                 <span className="mt-1 text-sm">選擇資料夾</span>
-                {/* @ts-ignore */}
+                {/* @ts-expect-error webkitdirectory 和 directory 屬性僅在運行時可用但類型定義中不存在 */}
                 <input 
                   type="file" 
                   ref={folderInputRef}
@@ -517,65 +634,13 @@ function App() {
           )}
 
           {/* 消息列表 */}
-          <div className="max-w-3xl mx-auto p-4 space-y-6">
-            {messages.map((message, index) => (
-              <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-md ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className={`flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${
-                    message.role === 'user' ? 'bg-purple-600' : 'bg-gray-600'
-                  }`}>
-                    {message.role === 'user' ? '我' : 'AI'}
-                  </div>
-                  <div className={`mx-2 px-4 py-2 rounded-lg ${
-                    message.role === 'user' 
-                      ? 'bg-purple-600 text-white' 
-                      : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* 消息來源 */}
-            {messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.sources && messages[messages.length - 1]?.sources.length > 0 && (
-              <div className="max-w-3xl mx-auto mt-2">
-                <details className="bg-gray-50 rounded-lg border border-gray-200">
-                  <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
-                    查看引用來源 ({messages[messages.length - 1]?.sources?.length})
-                  </summary>
-                  <div className="p-4 space-y-3">
-                    {messages[messages.length - 1]?.sources?.map((source, sourceIndex) => (
-                      <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-gray-700 font-medium">
-                            文件：{source.metadata.source}
-                          </span>
-                          {source.metadata.page !== undefined && source.metadata.page !== null && (
-                            <span className="text-gray-500 text-xs">
-                              第 {source.metadata.page} 頁
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                          {source.content}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              </div>
-            )}
-
-            {/* 顯示加載動畫 */}
-            {isLoading && (
-              <div className="flex justify-center p-4">
-                <div className="dot-flashing"></div>
-              </div>
-            )}
-            
-            {/* 用於滾動到底部的空元素 */}
-            <div ref={messagesEndRef} />
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="max-w-3xl mx-auto space-y-4">
+              {messages.map((message, index) => (
+                <div key={index}>{renderMessage(message)}</div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
         </div>
 
@@ -604,6 +669,33 @@ function App() {
           </form>
         </div>
       </div>
+
+      {/* 大圖預覽 */}
+      {selectedImage && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+          onClick={() => setSelectedImage(null)}
+        >
+          <div className="relative max-w-4xl w-full mx-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedImage(null);
+              }}
+              className="absolute top-4 right-4 text-white hover:text-gray-300"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={`${API_URL}${selectedImage}`}
+              alt="Selected product"
+              className="w-full rounded-lg"
+            />
+          </div>
+        </div>
+      )}
 
       <style>
         {`
