@@ -551,7 +551,7 @@ function App() {
                           <span className="text-gray-700 font-medium">
                             文件：{source.metadata.source}
                           </span>
-                          {source.metadata.page !== undefined && (
+                          {source.metadata.page !== undefined && source.metadata.page !== null && (
                             <span className="text-gray-500 text-xs">
                               第 {source.metadata.page} 頁
                             </span>
