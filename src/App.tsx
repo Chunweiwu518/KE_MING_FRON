@@ -1,20 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
-// 定義擴展的 Input 屬性類型
-interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInputElement> {
-  webkitdirectory?: string;
-  directory?: string;
-}
-
-interface FileInfo {
-  name: string;
-  lastModified?: number;
-  webkitRelativePath?: string;
-  size?: number;
-  type?: string;
-}
-
 interface Source {
   content: string
   metadata: {
@@ -41,7 +27,7 @@ const API_URL = import.meta.env.VITE_API_URL
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [files, setFiles] = useState<FileInfo[]>([])
+  const [files, setFiles] = useState<File[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
@@ -148,11 +134,11 @@ function App() {
 
     for(let i = 0; i < uploadedFiles.length; i++) {
       const file = uploadedFiles[i]
-      const uploadFormData = new FormData()
-      uploadFormData.append('file', file)
+      const formData = new FormData()
+      formData.append('file', file)
       
       try {
-        await axios.post(`${API_URL}/api/upload`, uploadFormData, {
+        await axios.post(`${API_URL}/api/upload`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
@@ -232,6 +218,7 @@ function App() {
     setIsLoading(true)
     setError('正在處理資料夾中的文件...')
 
+    const formData = new FormData()
     let uploadedCount = 0
     let failedCount = 0
 
@@ -296,11 +283,11 @@ function App() {
     
     for(let i = 0; i < droppedFiles.length; i++) {
       const file = droppedFiles[i]
-      const dropFormData = new FormData()
-      dropFormData.append('file', file)
+      const formData = new FormData()
+      formData.append('file', file)
       
       try {
-        await axios.post(`${API_URL}/api/upload`, dropFormData, {
+        await axios.post(`${API_URL}/api/upload`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
@@ -372,12 +359,11 @@ function App() {
                   type="file" 
                   ref={folderInputRef}
                   webkitdirectory="true" 
-                  directory="true"
+                  directory=""
                   multiple 
                   className="hidden" 
                   onChange={handleFolderUpload} 
                   disabled={isLoading} 
-                  {...{} as ExtendedInputHTMLAttributes}
                 />
               </label>
               
@@ -548,53 +534,34 @@ function App() {
             ))}
 
             {/* 消息來源 */}
-            {(() => {
-              // 先檢查有沒有消息
-              if (messages.length === 0) return null;
-              
-              // 獲取最後一條消息
-              const lastMessage = messages[messages.length - 1];
-              
-              // 檢查是否是助手的消息，並且有來源
-              if (
-                lastMessage.role !== 'assistant' || 
-                !lastMessage.sources || 
-                !Array.isArray(lastMessage.sources) || 
-                lastMessage.sources.length === 0
-              ) {
-                return null;
-              }
-              
-              // 如果所有條件都滿足，顯示來源
-              return (
-                <div className="max-w-3xl mx-auto mt-2">
-                  <details className="bg-gray-50 rounded-lg border border-gray-200">
-                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
-                      查看引用來源 ({lastMessage.sources.length})
-                    </summary>
-                    <div className="p-4 space-y-3">
-                      {lastMessage.sources.map((source, sourceIndex) => (
-                        <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-700 font-medium">
-                              文件：{source.metadata.source}
+            {messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].sources && messages[messages.length - 1].sources.length > 0 && (
+              <div className="max-w-3xl mx-auto mt-2">
+                <details className="bg-gray-50 rounded-lg border border-gray-200">
+                  <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
+                    查看引用來源 ({messages[messages.length - 1].sources.length})
+                  </summary>
+                  <div className="p-4 space-y-3">
+                    {messages[messages.length - 1].sources.map((source, sourceIndex) => (
+                      <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-gray-700 font-medium">
+                            文件：{source.metadata.source}
+                          </span>
+                          {source.metadata.page && (
+                            <span className="text-gray-500 text-xs">
+                              第 {source.metadata.page} 頁
                             </span>
-                            {source.metadata.page !== undefined && (
-                              <span className="text-gray-500 text-xs">
-                                第 {source.metadata.page} 頁
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                            {source.content}
-                          </p>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              );
-            })()}
+                        <p className="text-gray-700 text-sm whitespace-pre-wrap">
+                          {source.content}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
 
             {/* 顯示加載動畫 */}
             {isLoading && (
@@ -634,51 +601,49 @@ function App() {
         </div>
       </div>
 
-      <style>
-        {`
-          .dot-flashing {
-            position: relative;
-            width: 10px;
-            height: 10px;
-            border-radius: 5px;
+      <style jsx>{`
+        .dot-flashing {
+          position: relative;
+          width: 10px;
+          height: 10px;
+          border-radius: 5px;
+          background-color: #9880ff;
+          animation: dot-flashing 1s infinite linear alternate;
+          animation-delay: 0.5s;
+        }
+        .dot-flashing::before, .dot-flashing::after {
+          content: '';
+          display: inline-block;
+          position: absolute;
+          top: 0;
+        }
+        .dot-flashing::before {
+          left: -15px;
+          width: 10px;
+          height: 10px;
+          border-radius: 5px;
+          background-color: #9880ff;
+          animation: dot-flashing 1s infinite alternate;
+          animation-delay: 0s;
+        }
+        .dot-flashing::after {
+          left: 15px;
+          width: 10px;
+          height: 10px;
+          border-radius: 5px;
+          background-color: #9880ff;
+          animation: dot-flashing 1s infinite alternate;
+          animation-delay: 1s;
+        }
+        @keyframes dot-flashing {
+          0% {
             background-color: #9880ff;
-            animation: dot-flashing 1s infinite linear alternate;
-            animation-delay: 0.5s;
           }
-          .dot-flashing::before, .dot-flashing::after {
-            content: '';
-            display: inline-block;
-            position: absolute;
-            top: 0;
+          50%, 100% {
+            background-color: rgba(152, 128, 255, 0.2);
           }
-          .dot-flashing::before {
-            left: -15px;
-            width: 10px;
-            height: 10px;
-            border-radius: 5px;
-            background-color: #9880ff;
-            animation: dot-flashing 1s infinite alternate;
-            animation-delay: 0s;
-          }
-          .dot-flashing::after {
-            left: 15px;
-            width: 10px;
-            height: 10px;
-            border-radius: 5px;
-            background-color: #9880ff;
-            animation: dot-flashing 1s infinite alternate;
-            animation-delay: 1s;
-          }
-          @keyframes dot-flashing {
-            0% {
-              background-color: #9880ff;
-            }
-            50%, 100% {
-              background-color: rgba(152, 128, 255, 0.2);
-            }
-          }
-        `}
-      </style>
+        }
+      `}</style>
     </div>
   )
 }
