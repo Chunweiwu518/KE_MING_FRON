@@ -358,6 +358,7 @@ function App() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                 </svg>
                 <span className="mt-1 text-sm">選擇資料夾</span>
+                {/* @ts-ignore */}
                 <input 
                   type="file" 
                   ref={folderInputRef}
@@ -550,7 +551,7 @@ function App() {
                           <span className="text-gray-700 font-medium">
                             文件：{source.metadata.source}
                           </span>
-                          {source.metadata.page && (
+                          {source.metadata.page !== undefined && (
                             <span className="text-gray-500 text-xs">
                               第 {source.metadata.page} 頁
                             </span>
