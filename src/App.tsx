@@ -347,7 +347,8 @@ function App() {
       setFiles(prev => [...prev, tempFile]);
       
       try {
-        const _response = await axios.post(`${API_URL}/api/upload`, uploadFormData, {
+        // 直接調用 API 不保留 response 變數
+        await axios.post(`${API_URL}/api/upload`, uploadFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
@@ -482,7 +483,8 @@ function App() {
         const individualFormData = new FormData()
         individualFormData.append('file', file)
         
-        const _response = await axios.post(`${API_URL}/api/upload`, individualFormData, {
+        // 直接調用 API 不保留 response 變數
+        await axios.post(`${API_URL}/api/upload`, individualFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
