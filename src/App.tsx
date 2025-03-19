@@ -347,7 +347,7 @@ function App() {
       setFiles(prev => [...prev, tempFile]);
       
       try {
-        const response = await axios.post(`${API_URL}/api/upload`, uploadFormData, {
+        const _response = await axios.post(`${API_URL}/api/upload`, uploadFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
