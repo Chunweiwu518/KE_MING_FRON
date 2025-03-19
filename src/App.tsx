@@ -482,7 +482,7 @@ function App() {
         const individualFormData = new FormData()
         individualFormData.append('file', file)
         
-        await axios.post(`${API_URL}/api/upload`, individualFormData, {
+        const _response = await axios.post(`${API_URL}/api/upload`, individualFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
