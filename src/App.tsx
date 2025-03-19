@@ -7,6 +7,47 @@ interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInpu
   directory?: string;
 }
 
+// 文本格式化函數
+const formatText = (text: string): string => {
+  // 替換產品規格的格式
+  let formattedText = text
+    // 保留換行符
+    .replace(/\n/g, '<br/>')
+    // 替換標準的分隔符為HTML換行和列表項
+    .replace(/-\s?\*\*([^*]+)\*\*:\s?/g, '<li><strong>$1</strong>: ')
+    .replace(/\*\*([^*]+)\*\*:/g, '<strong>$1</strong>:')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    // 處理冒號後面的內容
+    .replace(/(\d+)x(\d+)/g, '$1×$2')
+    // 確保適當的列表包裹
+    .replace(/<li>/g, '<li class="mb-2 list-disc ml-4">')
+    // 讓產品標題更明顯
+    .replace(/(HK-\d+的產品資料如下：)/g, '<div class="text-lg font-medium my-2">$1</div>')
+
+  // 檢查是否有列表項，如果有則添加ul標籤
+  if (formattedText.includes('<li>')) {
+    formattedText = formattedText.replace(/<li>(.+?)(?=<li>|$)/g, '<ul><li>$1</ul>')
+    // 修復嵌套的ul標籤
+    formattedText = formattedText.replace(/<\/ul><ul>/g, '')
+  }
+
+  return formattedText
+}
+
+// 根據文本內容返回適當的CSS類
+const getMessageStyle = (content: string, role: 'user' | 'assistant'): string => {
+  if (role === 'user') {
+    return 'bg-purple-600 text-white'
+  }
+  
+  // 如果是產品資訊，增加更好的排版樣式
+  if (content.includes('產品資料如下') || content.includes('商品名稱')) {
+    return 'bg-gray-100 text-gray-800 product-info'
+  }
+  
+  return 'bg-gray-100 text-gray-800'
+}
+
 interface FileInfo {
   name: string;
   lastModified?: number;
@@ -69,7 +110,11 @@ function App() {
   const fetchChatHistories = async () => {
     try {
       const response = await axios.get(`${API_URL}/api/history`)
-      setChatHistories(response.data)
+      // 按創建時間排序，最新的在前面
+      const sortedHistories = response.data.sort((a: ChatHistory, b: ChatHistory) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setChatHistories(sortedHistories)
     } catch (error) {
       console.error('Failed to fetch chat histories:', error)
     }
@@ -93,39 +138,160 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
-    const newMessage: Message = {
-      role: 'user',
-      content: input.trim()
-    }
-
-    setMessages(prev => [...prev, newMessage])
+    // 保存當前的輸入內容，因為之後會清空輸入框
+    const currentInput = input.trim()
+    
+    // 防止提交時重複處理
     setInput('')
     setIsLoading(true)
     setError(null)
 
+    // 創建用戶消息
+    const newMessage: Message = {
+      role: 'user',
+      content: currentInput
+    }
+
+    // 創建一個初始的助手消息
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: '',
+      sources: []
+    }
+
+    // 檢查是否需要創建新對話
+    const isNewChat = !currentChatId
+
+    // 將用戶消息和初始的空助手消息加入到聊天記錄
+    setMessages(prev => [...prev, newMessage, assistantMessage])
+
     try {
-      const response = await axios.post(`${API_URL}/api/chat`, {
-        query: input.trim(),
-        history: messages
+      // 使用 fetch API 發起 POST 請求
+      const response = await fetch(`${API_URL}/api/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: currentInput,
+          history: messages
+        })
       })
 
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: response.data.answer,
-        sources: response.data.sources
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      const updatedMessages = [...messages, newMessage, assistantMessage]
-      setMessages(updatedMessages)
+      // 表示我們處理過這個對話的請求，避免重複保存
+      let conversationProcessed = false;
 
-      // 保存對話
-      if (!currentChatId) {
-        const historyResponse = await axios.post(`${API_URL}/api/history`, {
-          messages: updatedMessages,
-          title: input.trim().slice(0, 20) + "..."
-        })
-        setCurrentChatId(historyResponse.data.id)
-        await fetchChatHistories() // 重新獲取對話列表
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('無法獲取響應流')
+      }
+
+      // 創建一個暫存的助手回應和來源
+      let tempResponse = ''
+      let sources: Source[] = []
+      
+      // 創建文本解碼器
+      const decoder = new TextDecoder()
+
+      // 處理流式數據
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        // 將二進制數據解碼為文本
+        const text = decoder.decode(value, { stream: true })
+        
+        // 處理SSE格式的數據行
+        const lines = text.split('\n\n')
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          
+          const data = line.substring(6) // 去掉 "data: " 前綴
+          
+          // 檢測特殊標記
+          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
+            // 解析來源數據
+            const sourcesData = data.replace('[SOURCES]', '').replace('[/SOURCES]', '')
+            try {
+              sources = JSON.parse(sourcesData)
+            } catch (e) {
+              console.error('解析來源數據失敗:', e)
+            }
+          } 
+          // 檢測錯誤信息
+          else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
+            const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
+            setError(`聊天請求失敗: ${errorMsg}`)
+            break
+          }
+          // 檢測結束標記
+          else if (data === '[DONE]') {
+            // 更新最終的助手消息，包括來源
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse,
+                    sources: sources
+                  }
+                  break
+                }
+              }
+              
+              // 只有在這是新對話且尚未處理過時，才保存歷史
+              if (isNewChat && !conversationProcessed && updatedMessages.length >= 2) {
+                // 標記為已處理
+                conversationProcessed = true;
+                console.log('流處理完成，準備保存對話歷史');
+                
+                // 使用setTimeout確保當前狀態更新完畢後再保存歷史
+                setTimeout(() => {
+                  // 再次檢查沒有currentChatId才創建新對話
+                  if (!currentChatId) {
+                    saveOrUpdateChatHistory(
+                      updatedMessages, 
+                      currentInput.slice(0, 20) + "..."
+                    );
+                  }
+                }, 100);
+              }
+              
+              return updatedMessages
+            })
+            break
+          } 
+          // 一般情況：處理正常的字符
+          else {
+            tempResponse += data
+            // 更新助手消息的內容
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse
+                  }
+                  break
+                }
+              }
+              return updatedMessages
+            })
+
+            // 增加一個小延遲再滾動，確保DOM已更新
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }, 10);
+          }
+        }
       }
     } catch (error) {
       console.error('Chat error:', error)
@@ -331,6 +497,49 @@ function App() {
     loadVectorStoreStats()
   }, [files]) // 當文件列表變化時重新加載
 
+  // 新增/更新對話歷史
+  const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
+    try {
+      // 如果當前已經有對話ID，且非新對話，則跳過保存
+      if (currentChatId) {
+        console.log('已有對話ID，跳過創建新歷史:', currentChatId);
+        return null;
+      } else {
+        console.log('創建新對話歷史');
+        return await createNewChatHistory(messages, title);
+      }
+    } catch (error) {
+      console.error('保存對話歷史失敗:', error);
+      return null;
+    }
+  };
+
+  // 創建新的對話歷史
+  const createNewChatHistory = async (messages: Message[], title?: string) => {
+    try {
+      console.log('開始創建新對話歷史, 訊息數量:', messages.length);
+      const historyResponse = await axios.post(`${API_URL}/api/history`, {
+        messages: messages,
+        title: title
+      });
+      console.log('對話歷史創建成功, ID:', historyResponse.data.id);
+      setCurrentChatId(historyResponse.data.id);
+      await fetchChatHistories(); // 重新獲取對話列表
+      return historyResponse.data;
+    } catch (error) {
+      console.error('創建對話歷史失敗:', error);
+      return null;
+    }
+  };
+
+  // 新對話按鈕
+  const startNewChat = () => {
+    console.log('開始新對話，重置狀態');
+    setMessages([]);
+    setCurrentChatId(null);
+    setError(null);
+  };
+
   return (
     <div className="flex h-screen bg-white">
       {/* 側邊欄 */}
@@ -456,10 +665,7 @@ function App() {
           {/* 新對話按鈕 */}
           <div className="p-4 border-t border-gray-200">
             <button
-              onClick={() => {
-                setMessages([])
-                setCurrentChatId(null)
-              }}
+              onClick={startNewChat}
               className="w-full py-2 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors"
             >
               開始新對話
@@ -539,9 +745,18 @@ function App() {
                   <div className={`mx-2 px-4 py-2 rounded-lg ${
                     message.role === 'user' 
                       ? 'bg-purple-600 text-white' 
-                      : 'bg-gray-100 text-gray-800'
+                      : getMessageStyle(message.content, message.role)
                   }`}>
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    {message.role === 'assistant' ? (
+                      <div 
+                        className="text-sm formatted-message"
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatText(message.content) 
+                        }}
+                      />
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -676,6 +891,52 @@ function App() {
             50%, 100% {
               background-color: rgba(152, 128, 255, 0.2);
             }
+          }
+          
+          .product-info {
+            line-height: 1.6;
+            font-size: 0.9rem;
+          }
+          
+          .product-info p {
+            margin-bottom: 8px;
+          }
+          
+          .formatted-message {
+            line-height: 1.6;
+            min-height: 20px;
+          }
+          
+          .formatted-message ul {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+          }
+          
+          .formatted-message strong {
+            font-weight: 600;
+          }
+          
+          .formatted-message div {
+            margin-bottom: 0.5rem;
+          }
+          
+          .formatted-message br {
+            display: block;
+            margin: 5px 0;
+            content: "";
+          }
+          
+          @keyframes blink {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          
+          .formatted-message::after {
+            content: '|';
+            animation: blink 1s infinite;
+            animation-timing-function: step-end;
+            margin-left: 1px;
+            color: #9880ff;
           }
         `}
       </style>
