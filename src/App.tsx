@@ -50,10 +50,14 @@ const getMessageStyle = (content: string, role: 'user' | 'assistant'): string =>
 
 interface FileInfo {
   name: string;
-  lastModified?: number;
-  webkitRelativePath?: string;
+  display_name?: string;
   size?: number;
+  lastModified?: number;
+  uploadTime?: string;
+  webkitRelativePath?: string;
   type?: string;
+  status?: 'uploading' | 'success' | 'error';
+  errorMessage?: string;
 }
 
 interface Source {
@@ -100,12 +104,25 @@ function App() {
   // 載入歷史對話
   useEffect(() => {
     fetchChatHistories()
+    // 添加獲取已上傳檔案的調用
+    fetchUploadedFiles()
   }, [])
 
   // 滾動到最新消息
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 獲取已上傳的檔案列表
+  const fetchUploadedFiles = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/files`)
+      setFiles(response.data)
+      console.log('已獲取上傳檔案列表:', response.data.length)
+    } catch (error) {
+      console.error('獲取上傳檔案列表失敗:', error)
+    }
+  }
 
   const fetchChatHistories = async () => {
     try {
@@ -311,27 +328,64 @@ function App() {
 
     setIsLoading(true)
     setError('正在處理文件...')
+    let uploadSuccess = false;
 
     for(let i = 0; i < uploadedFiles.length; i++) {
       const file = uploadedFiles[i]
       const uploadFormData = new FormData()
       uploadFormData.append('file', file)
       
+      // 添加一個臨時文件項，狀態為上傳中
+      const tempFileId = Date.now() + '_' + i; // 創建一個臨時ID
+      const tempFile: FileInfo = { 
+        name: tempFileId,
+        display_name: file.name,
+        size: file.size,
+        status: 'uploading'
+      };
+      
+      setFiles(prev => [...prev, tempFile]);
+      
       try {
-        await axios.post(`${API_URL}/api/upload`, uploadFormData, {
+        const response = await axios.post(`${API_URL}/api/upload`, uploadFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
-        })
-        setFiles(prev => [...prev, { name: file.name }])
+        });
+        
+        // 上傳成功，移除臨時文件
+        setFiles(prev => prev.filter(f => f.name !== tempFileId));
+        uploadSuccess = true;
       } catch (error) {
-        console.error('文件上傳失敗:', error)
-        setError(`文件 ${file.name} 上傳失敗`)
+        console.error('文件上傳失敗:', error);
+        
+        // 更新文件狀態為錯誤
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            return {
+              ...f,
+              status: 'error',
+              errorMessage: '上傳失敗'
+            };
+          }
+          return f;
+        }));
+        
+        setError(`文件 ${file.name} 上傳失敗`);
       }
     }
     
-    setIsLoading(false)
-    setError(null)
+    // 如果至少有一個文件上傳成功，則重新獲取文件列表
+    if (uploadSuccess) {
+      await fetchUploadedFiles();
+    }
+    
+    setIsLoading(false);
+    
+    // 如果沒有錯誤提示，清除錯誤狀態
+    if (!files.some(f => f.status === 'error')) {
+      setError(null);
+    }
   }
 
   const removeFile = async (index: number) => {
@@ -339,6 +393,8 @@ function App() {
     try {
       await axios.delete(`${API_URL}/api/files/${fileToRemove.name}`)
       setFiles(prev => prev.filter((_, i) => i !== index))
+      // 手動刷新知識庫統計
+      await loadVectorStoreStats()
     } catch (error) {
       console.error('Delete error:', error)
       if (axios.isAxiosError(error)) {
@@ -375,7 +431,8 @@ function App() {
     
     try {
       await axios.delete(`${API_URL}/api/vector-store/clear`)
-      setFiles([]) // 清空文件列表
+      // 清空後重新獲取檔案列表
+      await fetchUploadedFiles()
       setError(null)
       await loadVectorStoreStats()
     } catch (error) {
@@ -400,6 +457,7 @@ function App() {
 
     let uploadedCount = 0
     let failedCount = 0
+    let uploadSuccess = false
 
     // 處理所有文件
     for (let i = 0; i < files.length; i++) {
@@ -408,6 +466,17 @@ function App() {
       // 檢查副檔名
       const fileExt = file.name.toLowerCase().split('.').pop()
       if (!['txt', 'pdf', 'docx'].includes(fileExt || '')) continue
+      
+      // 添加一個臨時文件項，狀態為上傳中
+      const tempFileId = `folder_${Date.now()}_${i}`; // 創建一個臨時ID
+      const tempFile: FileInfo = { 
+        name: tempFileId,
+        display_name: file.name,
+        size: file.size,
+        status: 'uploading'
+      };
+      
+      setFiles(prev => [...prev, tempFile]);
       
       try {
         const individualFormData = new FormData()
@@ -419,14 +488,34 @@ function App() {
           }
         })
         
-        setFiles(prev => [...prev, { name: file.name }])
+        // 上傳成功，移除臨時文件
+        setFiles(prev => prev.filter(f => f.name !== tempFileId));
         uploadedCount++
+        uploadSuccess = true
       } catch (error) {
         console.error(`上傳文件失敗: ${file.name}`, error)
+        
+        // 更新文件狀態為錯誤
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            return {
+              ...f,
+              status: 'error',
+              errorMessage: '上傳失敗'
+            };
+          }
+          return f;
+        }));
+        
         failedCount++
       }
     }
 
+    // 如果至少有一個文件上傳成功，則重新獲取文件列表
+    if (uploadSuccess) {
+      await fetchUploadedFiles()
+    }
+    
     setIsLoading(false)
     if (failedCount > 0) {
       setError(`${uploadedCount} 個文件上傳成功，${failedCount} 個文件失敗`)
@@ -459,9 +548,29 @@ function App() {
     
     setIsLoading(true)
     setError('正在處理文件...')
+    let uploadSuccess = false
     
     for(let i = 0; i < droppedFiles.length; i++) {
       const file = droppedFiles[i]
+      
+      // 檢查副檔名
+      const fileExt = file.name.toLowerCase().split('.').pop()
+      if (!['txt', 'pdf', 'docx'].includes(fileExt || '')) {
+        setError(`不支持的文件類型: ${file.name}. 僅支持 PDF, TXT, DOCX`)
+        continue
+      }
+      
+      // 添加一個臨時文件項，狀態為上傳中
+      const tempFileId = `drop_${Date.now()}_${i}`; // 創建一個臨時ID
+      const tempFile: FileInfo = { 
+        name: tempFileId,
+        display_name: file.name,
+        size: file.size,
+        status: 'uploading'
+      };
+      
+      setFiles(prev => [...prev, tempFile]);
+      
       const dropFormData = new FormData()
       dropFormData.append('file', file)
       
@@ -471,15 +580,39 @@ function App() {
             'Content-Type': 'multipart/form-data'
           }
         })
-        setFiles(prev => [...prev, { name: file.name }])
+        
+        // 上傳成功，移除臨時文件
+        setFiles(prev => prev.filter(f => f.name !== tempFileId));
+        uploadSuccess = true
       } catch (error) {
         console.error('文件上傳失敗:', error)
+        
+        // 更新文件狀態為錯誤
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            return {
+              ...f,
+              status: 'error',
+              errorMessage: '上傳失敗'
+            };
+          }
+          return f;
+        }));
+        
         setError(`文件 ${file.name} 上傳失敗`)
       }
     }
     
+    // 如果至少有一個文件上傳成功，則重新獲取文件列表
+    if (uploadSuccess) {
+      await fetchUploadedFiles()
+    }
+    
     setIsLoading(false)
-    setError(null)
+    // 如果沒有錯誤提示，清除錯誤狀態
+    if (!files.some(f => f.status === 'error')) {
+      setError(null)
+    }
   }
 
   // 添加加載統計信息的函數
@@ -608,17 +741,61 @@ function App() {
               <div className="max-h-40 overflow-y-auto">
                 <div className="space-y-1">
                   {files.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 rounded bg-gray-100 text-sm">
-                      <span className="truncate flex-1 text-gray-800">{file.name}</span>
-                      <button
-                        onClick={() => removeFile(index)}
-                        className="ml-2 text-gray-400 hover:text-red-400"
-                        disabled={isLoading}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
+                    <div 
+                      key={index} 
+                      className={`flex items-center justify-between p-2 rounded text-sm ${
+                        file.status === 'error' 
+                          ? 'bg-red-50 border border-red-100' 
+                          : file.status === 'uploading' 
+                            ? 'bg-blue-50 border border-blue-100' 
+                            : 'bg-gray-100'
+                      }`}
+                    >
+                      <div className="flex flex-col flex-1 pr-2 overflow-hidden">
+                        <div className="flex items-center">
+                          {file.status === 'uploading' && (
+                            <div className="h-3 w-3 mr-1 rounded-full bg-blue-400 animate-pulse"></div>
+                          )}
+                          {file.status === 'error' && (
+                            <svg className="h-3 w-3 mr-1 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className="truncate text-gray-800">
+                            {file.display_name || file.name}
+                          </span>
+                        </div>
+                        
+                        {file.errorMessage && (
+                          <span className="text-xs text-red-500">{file.errorMessage}</span>
+                        )}
+                        
+                        {file.size && !file.status && (
+                          <span className="text-xs text-gray-500">
+                            {(file.size / 1024).toFixed(1)} KB
+                            {file.uploadTime && ` • ${new Date(file.uploadTime).toLocaleDateString()}`}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {!file.status || file.status === 'error' ? (
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="ml-2 text-gray-400 hover:text-red-400"
+                          disabled={isLoading}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      ) : file.status === 'uploading' ? (
+                        <div className="ml-2 text-blue-400">
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
