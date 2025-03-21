@@ -92,6 +92,7 @@ function App() {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const [vectorStoreStats, setVectorStoreStats] = useState({
@@ -334,6 +335,12 @@ function App() {
       const file = uploadedFiles[i]
       const uploadFormData = new FormData()
       uploadFormData.append('file', file)
+      
+      // 添加OCR處理的預設參數
+      uploadFormData.append('use_openai_ocr', 'true')
+      uploadFormData.append('page_by_page', 'true')
+      uploadFormData.append('batch_size', '10')
+      uploadFormData.append('max_pages', '30')
       
       // 添加一個臨時文件項，狀態為上傳中
       const tempFileId = Date.now() + '_' + i; // 創建一個臨時ID

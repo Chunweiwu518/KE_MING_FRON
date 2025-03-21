@@ -1,0 +1,7 @@
+# 環境變數檔案
+.env
+.env.local
+.env.*.local
+
+# 依賴目錄
+node_modules/ 
