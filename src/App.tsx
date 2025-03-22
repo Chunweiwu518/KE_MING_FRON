@@ -146,8 +146,6 @@ function App() {
   // 載入歷史對話
   useEffect(() => {
     fetchChatHistories()
-    // 添加獲取已上傳檔案的調用
-    fetchUploadedFiles()
   }, [])
 
   // 滾動到最新消息
@@ -679,153 +677,9 @@ function App() {
     e.preventDefault()
   }
 
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    const droppedFiles = e.dataTransfer.files
-    if (droppedFiles.length === 0) return
-    
-    setIsLoading(true)
-    setShowUploadedFiles(true)
-    setTotalUploadProgress(0)
-    setError('正在處理文件...')
-    let uploadSuccess = false
-    
-    // 過濾支持的檔案類型
-    const supportedFiles = Array.from(droppedFiles).filter(file => {
-      const fileExt = file.name.toLowerCase().split('.').pop()
-      return ['txt', 'pdf', 'docx'].includes(fileExt || '')
-    })
-    
-    if (supportedFiles.length === 0) {
-      setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
-      setIsLoading(false)
-      setShowUploadedFiles(false)
-      return
-    }
-    
-    for(let i = 0; i < supportedFiles.length; i++) {
-      const file = supportedFiles[i]
-      
-      // 更新總體進度指示器
-      setTotalUploadProgress(Math.round(((i) / supportedFiles.length) * 100));
-      
-      // 檢查檔案類型已在上面的過濾中完成
-      console.log(`開始處理拖放文件: ${file.name} (${i+1}/${supportedFiles.length})`)
-      
-      // 添加一個臨時文件項，狀態為上傳中
-      const tempFileId = `drop_${Date.now()}_${i}`; // 創建一個臨時ID
-      const tempFile: FileInfo = { 
-        name: tempFileId,
-        display_name: file.name,
-        size: file.size,
-        status: 'uploading',
-        progress: 0
-      };
-      
-      setFiles(prev => [...prev, tempFile]);
-      
-      const dropFormData = new FormData()
-      dropFormData.append('file', file)
-      
-      try {
-        await axios.post(`${API_URL}/api/upload`, dropFormData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          onUploadProgress: (progressEvent) => {
-            const filePercentCompleted = progressEvent.total 
-              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
-              : 0;
-              
-            // 更新檔案進度
-            setFiles(prev => prev.map(f => {
-              if (f.name === tempFileId) {
-                return {
-                  ...f,
-                  progress: filePercentCompleted
-                };
-              }
-              return f;
-            }));
-            
-            // 更新全局進度 - 結合當前檔案進度和整體進度
-            const overallProgress = Math.round(
-              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / supportedFiles.length) * 100
-            );
-            setTotalUploadProgress(overallProgress);
-          }
-        })
-        
-        // 更新為成功狀態
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            const successFile = {
-              ...f,
-              status: 'success',
-              progress: 100
-            };
-            
-            // 延遲移除狀態標記
-            setTimeout(() => {
-              setFiles(curr => curr.map(cf => {
-                if (cf.name === tempFileId) {
-                  const { status, progress, ...rest } = cf;
-                  return rest;
-                }
-                return cf;
-              }));
-            }, 2000);
-            
-            return successFile;
-          }
-          return f;
-        }));
-        
-        uploadSuccess = true
-      } catch (error) {
-        console.error('文件上傳失敗:', error)
-        
-        // 更新文件狀態為錯誤
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            return {
-              ...f,
-              status: 'error',
-              progress: 0,
-              errorMessage: '上傳失敗'
-            };
-          }
-          return f;
-        }));
-        
-        setError(`文件 ${file.name} 上傳失敗`)
-      }
-    }
-    
-    // 設置最終進度為100%
-    setTotalUploadProgress(100)
-    
-    // 如果至少有一個文件上傳成功，則重新獲取文件列表
-    if (uploadSuccess) {
-      await fetchUploadedFiles()
-      
-      // 顯示上傳成功提示
-      setShowUploadSuccess(true);
-      setTimeout(() => {
-        setShowUploadSuccess(false);
-      }, 3000);
-    }
-    
-    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
-    setTimeout(() => {
-      setIsLoading(false)
-      setShowUploadedFiles(false)
-    }, 500)
-    
-    // 如果沒有錯誤提示，清除錯誤狀態
-    if (!files.some(f => f.status === 'error')) {
-      setError(null)
-    }
+    // 由於我們已經移除了文件上傳功能，這裡只需要防止瀏覽器默認行為
   }
 
   // 添加加載統計信息的函數
@@ -1119,10 +973,9 @@ function App() {
           {messages.length === 0 && (
             <div className="flex h-full items-center justify-center">
               <div className="text-center p-8 rounded-lg max-w-md">
-                <div className="text-5xl mb-4">📄</div>
+                <div className="text-5xl mb-4">💬</div>
                 <h2 className="text-xl font-semibold mb-2 text-gray-800">歡迎使用 RAG 聊天助手</h2>
-                <p className="mb-4 text-gray-600">您可以提問關於您上傳文件的內容，或者將文件拖拽到此處上傳</p>
-                <p className="text-sm text-gray-500">支持 PDF、Word、TXT 等格式</p>
+                <p className="mb-4 text-gray-600">您可以開始提問，AI 助手會根據知識庫內容為您解答</p>
               </div>
             </div>
           )}
@@ -1159,13 +1012,8 @@ function App() {
 
             {/* 消息來源 */}
             {(() => {
-              // 先檢查有沒有消息
               if (messages.length === 0) return null;
-              
-              // 獲取最後一條消息
               const lastMessage = messages[messages.length - 1];
-              
-              // 檢查是否是助手的消息，並且有來源
               if (
                 lastMessage.role !== 'assistant' || 
                 !lastMessage.sources || 
@@ -1174,8 +1022,6 @@ function App() {
               ) {
                 return null;
               }
-              
-              // 如果所有條件都滿足，顯示來源
               return (
                 <div className="max-w-3xl mx-auto mt-2">
                   <details className="bg-gray-50 rounded-lg border border-gray-200">
@@ -1286,15 +1132,6 @@ function App() {
             50%, 100% {
               background-color: rgba(152, 128, 255, 0.2);
             }
-          }
-          
-          .product-info {
-            line-height: 1.6;
-            font-size: 0.9rem;
-          }
-          
-          .product-info p {
-            margin-bottom: 8px;
           }
           
           .formatted-message {
