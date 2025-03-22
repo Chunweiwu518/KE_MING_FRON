@@ -118,77 +118,44 @@ function App() {
     };
   }, []);
 
-  // 當當前對話ID變更時，自動加載對話內容
-  useEffect(() => {
-    if (currentChatId) {
-      loadChatHistory(currentChatId);
-    }
-  }, [currentChatId]);
-
   const fetchChatHistories = async () => {
     try {
-      console.log('正在獲取所有對話歷史');
       const response = await axios.get(`${API_URL}/api/history`)
       // 按創建時間排序，最新的在前面
       const sortedHistories = response.data.sort((a: ChatHistory, b: ChatHistory) => 
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
-      console.log(`獲取到 ${sortedHistories.length} 個對話歷史`);
       setChatHistories(sortedHistories)
     } catch (error) {
-      console.error('獲取對話歷史列表失敗:', error)
+      console.error('Failed to fetch chat histories:', error)
     }
   }
 
   const loadChatHistory = async (chatId: string) => {
     try {
-      if (!chatId) {
-        console.error('嘗試加載對話但未提供 chatId');
-        return;
-      }
-      
       setIsLoading(true);
       
       // 載入選擇的對話歷史
       console.log('正在載入對話歷史, ID:', chatId);
       const response = await axios.get(`${API_URL}/api/history/${chatId}`);
-      console.log('載入對話歷史回應 (完整):', JSON.stringify(response.data));
+      console.log('載入對話歷史回應:', response.data);
       
       if (response.data && response.data.messages) {
-        console.log('對話消息數量:', response.data.messages.length);
-        
-        // 更新消息列表
+        // 先更新當前對話ID
+        setCurrentChatId(chatId);
+        // 然後更新消息列表
         setMessages(response.data.messages);
         setError(null);
       } else {
-        console.error('對話歷史格式不正確 (詳細):', response.data);
-        if (response.data && response.data.messages === undefined) {
-          console.error('缺少 messages 屬性');
-          setError('對話歷史缺少消息數據');
-        } else if (response.data && !Array.isArray(response.data.messages)) {
-          console.error('messages 不是數組');
-          setError('對話歷史數據格式錯誤');
-        } else if (response.data && response.data.messages.length === 0) {
-          console.log('messages 數組為空，顯示空對話');
-          setMessages([]);
-          setError(null);
-        } else {
-          setError('對話歷史格式不正確，無法載入');
-        }
+        console.error('對話歷史格式不正確:', response.data);
+        setError('對話歷史格式不正確');
       }
     } catch (error) {
-      console.error('載入對話歷史失敗 (詳細):', error);
+      console.error('載入對話歷史失敗:', error);
       setError('載入對話歷史失敗');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // 選擇對話歷史
-  const selectChatHistory = (chatId: string) => {
-    console.log('選擇對話歷史:', chatId);
-    setCurrentChatId(chatId);
-    // loadChatHistory 會在 useEffect 中自動觸發
   };
 
   // 新對話按鈕
@@ -199,6 +166,7 @@ function App() {
       // 先重置狀態
       setMessages([]);
       setError(null);
+      setCurrentChatId(null);
 
       // 創建新的對話歷史
       const response = await axios.post(`${API_URL}/api/history`, {
@@ -207,8 +175,6 @@ function App() {
       });
       
       console.log('新對話創建成功:', response.data.id);
-      
-      // 更新當前聊天ID (會自動觸發加載)
       setCurrentChatId(response.data.id);
       
       // 更新歷史列表
@@ -239,14 +205,13 @@ function App() {
       sources: []
     }
 
-    // 更新UI中的消息
     const updatedMessages = [...messages, newMessage, assistantMessage]
     setMessages(updatedMessages)
 
     try {
       // 如果沒有當前對話ID，創建一個新的
       if (!currentChatId) {
-        console.log('沒有當前對話ID，創建新對話');
+        console.log('創建新對話');
         const historyResponse = await axios.post(`${API_URL}/api/history`, {
           messages: [newMessage],
           title: currentInput.slice(0, 30) + '...'
@@ -254,9 +219,26 @@ function App() {
         console.log('創建新對話成功:', historyResponse.data);
         setCurrentChatId(historyResponse.data.id);
       }
-      
+
+      // 更新現有對話
+      if (currentChatId) {
+        console.log('更新現有對話:', currentChatId);
+        try {
+          const updateResponse = await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+            messages: updatedMessages,
+            title: updatedMessages[0]?.content.slice(0, 30) + '...'
+          });
+          console.log('對話更新成功:', updateResponse.data);
+          
+          // 更新歷史列表
+          await fetchChatHistories();
+        } catch (updateError) {
+          console.error('對話更新失敗:', updateError);
+          setError('對話更新失敗');
+        }
+      }
+
       // 發送聊天請求
-      console.log('發送聊天請求，歷史消息數：', messages.length);
       const response = await fetch(`${API_URL}/api/chat/stream`, {
         method: 'POST',
         headers: {
@@ -264,7 +246,7 @@ function App() {
         },
         body: JSON.stringify({
           query: currentInput,
-          history: messages // 注意這裡只傳遞原來的消息，不包括新增的消息
+          history: messages  // 使用當前的消息歷史
         })
       })
 
@@ -311,7 +293,6 @@ function App() {
           }
           
           else if (data === '[DONE]') {
-            // 更新最後一條消息的內容
             setMessages(prev => {
               const updatedMessages = [...prev]
               for (let i = updatedMessages.length - 1; i >= 0; i--) {
@@ -326,31 +307,6 @@ function App() {
               }
               return updatedMessages
             })
-            
-            // 現在通過 API 更新對話歷史
-            if (currentChatId) {
-              try {
-                console.log(`更新對話歷史 ID: ${currentChatId}，消息數量: ${updatedMessages.length}`);
-                // 更新消息列表到後端
-                await axios.put(`${API_URL}/api/history/${currentChatId}`, {
-                  messages: updatedMessages.map(msg => ({
-                    role: msg.role,
-                    content: msg.content,
-                    sources: msg.sources || []
-                  })),
-                  title: updatedMessages.length > 0 && updatedMessages[0].role === 'user' 
-                    ? updatedMessages[0].content.slice(0, 30) + '...' 
-                    : '新對話'
-                });
-                console.log('對話歷史更新成功');
-                
-                // 刷新對話歷史列表
-                await fetchChatHistories();
-              } catch (updateError) {
-                console.error('更新對話歷史失敗:', updateError);
-              }
-            }
-            
             break
           }
           
@@ -375,7 +331,7 @@ function App() {
         }
       }
     } catch (error) {
-      console.error('對話請求失敗:', error)
+      console.error('Chat error:', error)
       if (axios.isAxiosError(error)) {
         setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
       } else {
@@ -458,7 +414,10 @@ function App() {
                   }`}
                 >
                   <button
-                    onClick={() => selectChatHistory(chat.id)}
+                    onClick={() => {
+                      console.log('載入對話歷史:', chat.id);
+                      loadChatHistory(chat.id);
+                    }}
                     className="flex-1 text-left"
                   >
                     <div className="truncate text-sm text-gray-800">{chat.title}</div>
