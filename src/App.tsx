@@ -39,52 +39,63 @@ const formatSourceContent = (content: string): string => {
   if (!content) return '';
   
   try {
-    // 移除 [SOURCES] 和 [/SOURCES] 標記
-    let cleanedContent = content;
-    if (content.includes('[SOURCES]') && content.includes('[/SOURCES]')) {
-      cleanedContent = content
-        .replace('[SOURCES]', '')
-        .replace('[/SOURCES]', '')
-        .trim();
-    }
-
-    // 檢查是否為JSON字符串並嘗試解析
+    // 如果內容是 JSON 字符串，嘗試解析
     try {
-      const parsed = JSON.parse(cleanedContent);
-      if (Array.isArray(parsed)) {
-        // 如果是數組，取第一個元素的內容
-        return parsed[0]?.content || '';
-      } else if (parsed.content) {
-        // 如果是對象且有content屬性
+      const parsed = JSON.parse(content);
+      if (parsed.content) {
         return parsed.content;
       }
     } catch (e) {
-      // JSON 解析失敗，繼續處理
+      // 如果不是有效的 JSON，繼續處理
     }
-    
-    // 嘗試解碼Unicode轉義序列
-    const decodedContent = cleanedContent.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
+
+    // 移除 [SOURCES] 標記
+    let cleanedContent = content
+      .replace('[SOURCES]', '')
+      .replace('[/SOURCES]', '')
+      .trim();
+
+    // 嘗試提取 content 字段
+    const contentMatch = cleanedContent.match(/"content":"([^"]+)"/);
+    if (contentMatch) {
+      cleanedContent = contentMatch[1];
+    }
+
+    // 解碼 Unicode 轉義序列
+    cleanedContent = cleanedContent.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
       String.fromCharCode(parseInt(hex, 16))
     );
-    
-    // 如果內容以引號開始和結束，去除引號
-    let finalContent = decodedContent;
-    if ((finalContent.startsWith('"') && finalContent.endsWith('"')) || 
-        (finalContent.startsWith("'") && finalContent.endsWith("'"))) {
-      finalContent = finalContent.substring(1, finalContent.length - 1);
-    }
-    
-    // 移除雙反斜槓和特殊格式
-    finalContent = finalContent
+
+    // 清理其他轉義字符
+    cleanedContent = cleanedContent
       .replace(/\\n/g, '\n')
       .replace(/\\"/g, '"')
       .replace(/\\\\/g, '\\')
       .replace(/\\t/g, '\t');
-    
-    return finalContent;
+
+    // 移除多餘的反斜線
+    cleanedContent = cleanedContent.replace(/\\/g, '');
+
+    // 如果內容以引號開始和結束，去除引號
+    if ((cleanedContent.startsWith('"') && cleanedContent.endsWith('"')) || 
+        (cleanedContent.startsWith("'") && cleanedContent.endsWith("'"))) {
+      cleanedContent = cleanedContent.substring(1, cleanedContent.length - 1);
+    }
+
+    // 移除任何剩餘的 JSON 或特殊格式標記
+    cleanedContent = cleanedContent
+      .replace(/"metadata":\{[^}]+\}/g, '')
+      .replace(/"extraction_method":"[^"]+"/g, '')
+      .replace(/"filename":"[^"]+"/g, '')
+      .replace(/"score":[^,}]+/g, '')
+      .replace(/"page_info":\{[^}]+\}/g, '')
+      .replace(/\{|\}/g, '')
+      .trim();
+
+    return cleanedContent || '無法顯示內容';
   } catch (error) {
     console.error('格式化來源內容時出錯:', error);
-    return content; // 發生錯誤時返回原始內容
+    return '內容格式錯誤';
   }
 }
 
@@ -1210,31 +1221,52 @@ function App() {
                 return null;
               }
               
+              // 過濾掉空內容的來源
+              const validSources = lastMessage.sources.filter(source => {
+                const content = formatSourceContent(source.content);
+                return content && content !== '無法顯示內容' && content !== '內容格式錯誤';
+              });
+              
+              if (validSources.length === 0) return null;
+              
               // 如果所有條件都滿足，顯示來源
               return (
                 <div className="max-w-3xl mx-auto mt-2">
                   <details className="bg-gray-50 rounded-lg border border-gray-200">
-                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
-                      查看引用來源 ({lastMessage.sources.length})
+                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      引用來源 ({validSources.length})
                     </summary>
                     <div className="p-4 space-y-3">
-                      {lastMessage.sources.map((source, sourceIndex) => (
-                        <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-700 font-medium">
-                              文件：{source.metadata.source}
-                            </span>
-                            {source.metadata.page !== undefined && (
-                              <span className="text-gray-500 text-xs">
-                                第 {source.metadata.page} 頁
+                      {validSources.map((source, sourceIndex) => {
+                        const formattedContent = formatSourceContent(source.content);
+                        if (!formattedContent) return null;
+                        
+                        return (
+                          <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm hover:border-purple-200 transition-colors">
+                            <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100">
+                              <span className="text-gray-700 font-medium flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                {source.metadata.source.split('/').pop()}
                               </span>
-                            )}
+                              {source.metadata.page !== undefined && (
+                                <span className="text-gray-500 text-xs px-2 py-1 bg-gray-50 rounded">
+                                  第 {source.metadata.page} 頁
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-gray-700 text-sm leading-relaxed pl-2 border-l-2 border-gray-100">
+                              {formattedContent.split('\n').map((line, i) => (
+                                <p key={i} className="mb-1">{line}</p>
+                              ))}
+                            </div>
                           </div>
-                          <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                            {formatSourceContent(source.content)}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </details>
                 </div>
