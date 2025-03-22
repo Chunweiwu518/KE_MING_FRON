@@ -330,6 +330,8 @@ function App() {
     if (!e.target.files || e.target.files.length === 0) return;
     
     setIsLoading(true);
+    setUploading(true);
+    setTotalUploadProgress(0);
     let uploadSuccess = false;
     
     // 清除之前的錯誤
@@ -338,7 +340,12 @@ function App() {
     // 處理每個選擇的文件
     const selectedFiles = Array.from(e.target.files);
     
-    for (const file of selectedFiles) {
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      
+      // 更新總體進度指示器 - 顯示當前處理的檔案索引
+      setTotalUploadProgress(Math.round(((i) / selectedFiles.length) * 100));
+      
       // 生成臨時ID以便追蹤上傳狀態
       const tempFileId = Math.random().toString(36).substring(2, 10);
       
@@ -347,7 +354,8 @@ function App() {
         name: tempFileId,
         display_name: file.name,
         size: file.size,
-        status: 'uploading'
+        status: 'uploading',
+        progress: 0 // 初始進度為0
       }]);
       
       try {
@@ -360,12 +368,34 @@ function App() {
         formData.append('batch_size', '10');        // 批次大小
         
         // 顯示上傳進度
-        console.log(`開始上傳文件: ${file.name}`);
+        console.log(`開始上傳文件: ${file.name} (${i+1}/${selectedFiles.length})`);
         
-        // 執行上傳
+        // 使用 axios 進度追蹤功能
         const response = await axios.post(`${API_URL}/api/upload`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
+          },
+          onUploadProgress: (progressEvent) => {
+            const filePercentCompleted = progressEvent.total 
+              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              : 0;
+              
+            // 更新檔案進度
+            setFiles(prev => prev.map(f => {
+              if (f.name === tempFileId) {
+                return {
+                  ...f,
+                  progress: filePercentCompleted
+                };
+              }
+              return f;
+            }));
+            
+            // 更新全局進度 - 結合當前檔案進度和整體進度
+            const overallProgress = Math.round(
+              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / selectedFiles.length) * 100
+            );
+            setTotalUploadProgress(overallProgress);
           }
         });
         
@@ -374,13 +404,14 @@ function App() {
           if (f.name === tempFileId) {
             const processedFile = {
               ...f,
-              status: 'success'
+              status: 'success',
+              progress: 100
             };
             // 延遲移除上傳狀態標記
             setTimeout(() => {
               setFiles(curr => curr.map(cf => {
                 if (cf.name === tempFileId) {
-                  const { status, ...rest } = cf;
+                  const { status, progress, ...rest } = cf;
                   return rest;
                 }
                 return cf;
@@ -405,6 +436,7 @@ function App() {
             return {
               ...f,
               status: 'error',
+              progress: 0,
               errorMessage: '上傳失敗'
             };
           }
@@ -415,12 +447,19 @@ function App() {
       }
     }
     
+    // 最後設置總體進度為100%
+    setTotalUploadProgress(100);
+    
     // 如果至少有一個文件上傳成功，則重新獲取文件列表
     if (uploadSuccess) {
       await fetchUploadedFiles();
     }
     
-    setIsLoading(false);
+    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
+    setTimeout(() => {
+      setIsLoading(false);
+      setUploading(false);
+    }, 500);
     
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
@@ -489,23 +528,37 @@ function App() {
 
   // 處理資料夾上傳
   const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const uploadFiles = e.target.files
+    if (!uploadFiles || uploadFiles.length === 0) return
 
     setIsLoading(true)
+    setUploading(true)
+    setTotalUploadProgress(0)
     setError('正在處理資料夾中的文件...')
 
     let uploadedCount = 0
     let failedCount = 0
     let uploadSuccess = false
+    
+    // 過濾支持的檔案類型
+    const supportedFiles = Array.from(uploadFiles).filter(file => {
+      const fileExt = file.name.toLowerCase().split('.').pop()
+      return ['txt', 'pdf', 'docx'].includes(fileExt || '')
+    })
+    
+    if (supportedFiles.length === 0) {
+      setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
+      setIsLoading(false)
+      setUploading(false)
+      return
+    }
 
     // 處理所有文件
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
+    for (let i = 0; i < supportedFiles.length; i++) {
+      const file = supportedFiles[i]
       
-      // 檢查副檔名
-      const fileExt = file.name.toLowerCase().split('.').pop()
-      if (!['txt', 'pdf', 'docx'].includes(fileExt || '')) continue
+      // 更新總體進度指示器
+      setTotalUploadProgress(Math.round(((i) / supportedFiles.length) * 100));
       
       // 添加一個臨時文件項，狀態為上傳中
       const tempFileId = `folder_${Date.now()}_${i}`; // 創建一個臨時ID
@@ -513,7 +566,8 @@ function App() {
         name: tempFileId,
         display_name: file.name,
         size: file.size,
-        status: 'uploading'
+        status: 'uploading',
+        progress: 0
       };
       
       setFiles(prev => [...prev, tempFile]);
@@ -522,15 +576,62 @@ function App() {
         const individualFormData = new FormData()
         individualFormData.append('file', file)
         
-        // 直接調用 API 不保留 response 變數
+        console.log(`開始上傳資料夾文件: ${file.name} (${i+1}/${supportedFiles.length})`)
+        
+        // 使用 axios 進度追蹤功能
         await axios.post(`${API_URL}/api/upload`, individualFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
+          },
+          onUploadProgress: (progressEvent) => {
+            const filePercentCompleted = progressEvent.total 
+              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              : 0;
+              
+            // 更新檔案進度
+            setFiles(prev => prev.map(f => {
+              if (f.name === tempFileId) {
+                return {
+                  ...f,
+                  progress: filePercentCompleted
+                };
+              }
+              return f;
+            }));
+            
+            // 更新全局進度 - 結合當前檔案進度和整體進度
+            const overallProgress = Math.round(
+              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / supportedFiles.length) * 100
+            );
+            setTotalUploadProgress(overallProgress);
           }
         })
         
-        // 上傳成功，移除臨時文件
-        setFiles(prev => prev.filter(f => f.name !== tempFileId));
+        // 更新為成功狀態
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            const successFile = {
+              ...f,
+              status: 'success',
+              progress: 100
+            };
+            
+            // 延遲移除狀態標記
+            setTimeout(() => {
+              setFiles(curr => curr.map(cf => {
+                if (cf.name === tempFileId) {
+                  const { status, progress, ...rest } = cf;
+                  return rest;
+                }
+                return cf;
+              }));
+            }, 2000);
+            
+            return successFile;
+          }
+          return f;
+        }));
+        
         uploadedCount++
         uploadSuccess = true
       } catch (error) {
@@ -542,6 +643,7 @@ function App() {
             return {
               ...f,
               status: 'error',
+              progress: 0,
               errorMessage: '上傳失敗'
             };
           }
@@ -551,13 +653,21 @@ function App() {
         failedCount++
       }
     }
+    
+    // 設置最終進度為100%
+    setTotalUploadProgress(100)
 
     // 如果至少有一個文件上傳成功，則重新獲取文件列表
     if (uploadSuccess) {
       await fetchUploadedFiles()
     }
     
-    setIsLoading(false)
+    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
+    setTimeout(() => {
+      setIsLoading(false)
+      setUploading(false)
+    }, 500)
+    
     if (failedCount > 0) {
       setError(`${uploadedCount} 個文件上傳成功，${failedCount} 個文件失敗`)
     } else if (uploadedCount === 0) {
@@ -593,15 +703,27 @@ function App() {
     setError('正在處理文件...')
     let uploadSuccess = false
     
-    for(let i = 0; i < droppedFiles.length; i++) {
-      const file = droppedFiles[i]
-      
-      // 檢查副檔名
+    // 過濾支持的檔案類型
+    const supportedFiles = Array.from(droppedFiles).filter(file => {
       const fileExt = file.name.toLowerCase().split('.').pop()
-      if (!['txt', 'pdf', 'docx'].includes(fileExt || '')) {
-        setError(`不支持的文件類型: ${file.name}. 僅支持 PDF, TXT, DOCX`)
-        continue
-      }
+      return ['txt', 'pdf', 'docx'].includes(fileExt || '')
+    })
+    
+    if (supportedFiles.length === 0) {
+      setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
+      setIsLoading(false)
+      setUploading(false)
+      return
+    }
+    
+    for(let i = 0; i < supportedFiles.length; i++) {
+      const file = supportedFiles[i]
+      
+      // 更新總體進度指示器
+      setTotalUploadProgress(Math.round(((i) / supportedFiles.length) * 100));
+      
+      // 檢查檔案類型已在上面的過濾中完成
+      console.log(`開始處理拖放文件: ${file.name} (${i+1}/${supportedFiles.length})`)
       
       // 添加一個臨時文件項，狀態為上傳中
       const tempFileId = `drop_${Date.now()}_${i}`; // 創建一個臨時ID
@@ -624,7 +746,7 @@ function App() {
             'Content-Type': 'multipart/form-data'
           },
           onUploadProgress: (progressEvent) => {
-            const percentCompleted = progressEvent.total 
+            const filePercentCompleted = progressEvent.total 
               ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
               : 0;
               
@@ -633,14 +755,17 @@ function App() {
               if (f.name === tempFileId) {
                 return {
                   ...f,
-                  progress: percentCompleted
+                  progress: filePercentCompleted
                 };
               }
               return f;
             }));
             
-            // 更新全局進度
-            setTotalUploadProgress(percentCompleted);
+            // 更新全局進度 - 結合當前檔案進度和整體進度
+            const overallProgress = Math.round(
+              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / supportedFiles.length) * 100
+            );
+            setTotalUploadProgress(overallProgress);
           }
         })
         
@@ -690,13 +815,19 @@ function App() {
       }
     }
     
+    // 設置最終進度為100%
+    setTotalUploadProgress(100)
+    
     // 如果至少有一個文件上傳成功，則重新獲取文件列表
     if (uploadSuccess) {
       await fetchUploadedFiles()
     }
     
-    setIsLoading(false)
-    setUploading(false)
+    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
+    setTimeout(() => {
+      setIsLoading(false)
+      setUploading(false)
+    }, 500)
     
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
