@@ -98,6 +98,9 @@ function App() {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
+  const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
+  const [totalUploadProgress, setTotalUploadProgress] = useState(0)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -107,13 +110,6 @@ function App() {
     files: [],
     is_empty: true
   })
-  // 未使用的狀態變數 - 暫時註釋
-  // const [showAddChat, setShowAddChat] = useState(false)
-  // const [newChatName, setNewChatName] = useState("")
-  const [uploading, setUploading] = useState(false)
-  const [totalUploadProgress, setTotalUploadProgress] = useState(0)
-  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
-  const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
 
   // 載入歷史對話
   useEffect(() => {
@@ -169,35 +165,25 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
-    // 保存當前的輸入內容，因為之後會清空輸入框
     const currentInput = input.trim()
-    
-    // 防止提交時重複處理
     setInput('')
     setIsLoading(true)
     setError(null)
 
-    // 創建用戶消息
     const newMessage: Message = {
       role: 'user',
       content: currentInput
     }
 
-    // 創建一個初始的助手消息
     const assistantMessage: Message = {
       role: 'assistant',
       content: '',
       sources: []
     }
 
-    // 檢查是否需要創建新對話
-    const isNewChat = !currentChatId
-
-    // 將用戶消息和初始的空助手消息加入到聊天記錄
     setMessages(prev => [...prev, newMessage, assistantMessage])
 
     try {
-      // 使用 fetch API 發起 POST 請求
       const response = await fetch(`${API_URL}/api/chat/stream`, {
         method: 'POST',
         headers: {
@@ -213,22 +199,15 @@ function App() {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      // 表示我們處理過這個對話的請求，避免重複保存
-      let conversationProcessed = false;
-
       const reader = response.body?.getReader()
       if (!reader) {
         throw new Error('無法獲取響應流')
       }
 
-      // 創建一個暫存的助手回應和來源
       let tempResponse = ''
       let sources: Source[] = []
-      
-      // 創建文本解碼器
       const decoder = new TextDecoder()
 
-      // 處理流式數據
       while (true) {
         const { done, value } = await reader.read()
         
@@ -242,10 +221,9 @@ function App() {
           
           const data = line.slice(5)
           
-          // 檢測來源信息
           if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
             try {
-              const sourcesJson = data.slice(9, -10) // 移除 [SOURCES] 和 [/SOURCES] 標記
+              const sourcesJson = data.slice(9, -10)
               sources = JSON.parse(sourcesJson)
             } catch (error) {
               console.error('解析來源信息時出錯:', error)
@@ -253,19 +231,15 @@ function App() {
             continue
           }
           
-          // 檢測錯誤信息
           else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
             const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
             setError(`聊天請求失敗: ${errorMsg}`)
             break
           }
           
-          // 檢測結束標記
           else if (data === '[DONE]') {
-            // 更新最終的助手消息，包括來源
             setMessages(prev => {
               const updatedMessages = [...prev]
-              // 尋找並更新最新的助手消息
               for (let i = updatedMessages.length - 1; i >= 0; i--) {
                 if (updatedMessages[i].role === 'assistant') {
                   updatedMessages[i] = {
@@ -281,15 +255,11 @@ function App() {
             break
           }
           
-          // 一般情況：處理正常的字符
           else {
-            // 如果不是特殊標記，則添加到臨時響應中
             if (!data.includes('[SOURCES]') && !data.includes('[ERROR]') && data !== '[DONE]') {
               tempResponse += data
-              // 更新助手消息的內容
               setMessages(prev => {
                 const updatedMessages = [...prev]
-                // 尋找並更新最新的助手消息
                 for (let i = updatedMessages.length - 1; i >= 0; i--) {
                   if (updatedMessages[i].role === 'assistant') {
                     updatedMessages[i] = {
@@ -321,7 +291,7 @@ function App() {
     if (!e.target.files || e.target.files.length === 0) return;
     
     setIsLoading(true);
-    setUploading(true);
+    setShowUploadedFiles(true);
     setTotalUploadProgress(0);
     let uploadSuccess = false;
     
@@ -455,7 +425,7 @@ function App() {
     // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
     setTimeout(() => {
       setIsLoading(false);
-      setUploading(false);
+      setShowUploadedFiles(false);
     }, 500);
     
     // 如果沒有錯誤提示，清除錯誤狀態
@@ -529,7 +499,7 @@ function App() {
     if (!uploadFiles || uploadFiles.length === 0) return
 
     setIsLoading(true)
-    setUploading(true)
+    setShowUploadedFiles(true)
     setTotalUploadProgress(0)
     setError('正在處理資料夾中的文件...')
 
@@ -546,7 +516,7 @@ function App() {
     if (supportedFiles.length === 0) {
       setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
       setIsLoading(false)
-      setUploading(false)
+      setShowUploadedFiles(false)
       return
     }
 
@@ -668,7 +638,7 @@ function App() {
     // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
     setTimeout(() => {
       setIsLoading(false)
-      setUploading(false)
+      setShowUploadedFiles(false)
     }, 500)
     
     if (failedCount > 0) {
@@ -701,7 +671,7 @@ function App() {
     if (droppedFiles.length === 0) return
     
     setIsLoading(true)
-    setUploading(true)
+    setShowUploadedFiles(true)
     setTotalUploadProgress(0)
     setError('正在處理文件...')
     let uploadSuccess = false
@@ -715,7 +685,7 @@ function App() {
     if (supportedFiles.length === 0) {
       setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
       setIsLoading(false)
-      setUploading(false)
+      setShowUploadedFiles(false)
       return
     }
     
@@ -835,7 +805,7 @@ function App() {
     // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
     setTimeout(() => {
       setIsLoading(false)
-      setUploading(false)
+      setShowUploadedFiles(false)
     }, 500)
     
     // 如果沒有錯誤提示，清除錯誤狀態
@@ -869,23 +839,6 @@ function App() {
   }, [files]); // 當文件列表變化時重新加載
 
   // 新增/更新對話歷史
-  const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
-    try {
-      // 如果當前已經有對話ID，且非新對話，則跳過保存
-      if (currentChatId) {
-        console.log('已有對話ID，跳過創建新歷史:', currentChatId);
-        return null;
-      } else {
-        console.log('創建新對話歷史');
-        return await createNewChatHistory(messages, title);
-      }
-    } catch (error) {
-      console.error('保存對話歷史失敗:', error);
-      return null;
-    }
-  };
-
-  // 創建新的對話歷史
   const createNewChatHistory = async (messages: Message[], title?: string) => {
     try {
       console.log('開始創建新對話歷史, 訊息數量:', messages.length);
@@ -1076,7 +1029,7 @@ function App() {
             <h1 className="ml-4 text-lg font-medium text-gray-800">RAG 知識庫問答</h1>
             
             {/* 全局上傳進度指示器 */}
-            {uploading && (
+            {showUploadedFiles && (
               <div className="ml-auto flex items-center">
                 <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden mr-2">
                   <div 
