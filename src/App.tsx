@@ -155,13 +155,9 @@ function App() {
     console.log('開始新對話，重置狀態');
     
     try {
-      // 如果當前有對話且有消息，則更新該對話的內容
-      if (currentChatId && messages.length > 0) {
-        await axios.put(`${API_URL}/api/history/${currentChatId}`, {
-          messages: messages,
-          title: messages[0].content.slice(0, 30) + '...'
-        });
-      }
+      // 先重置狀態
+      setMessages([]);
+      setError(null);
 
       // 創建新的對話歷史
       const response = await axios.post(`${API_URL}/api/history`, {
@@ -171,15 +167,9 @@ function App() {
       
       console.log('新對話創建成功:', response.data.id);
       setCurrentChatId(response.data.id);
-      setMessages([]);
-      setError(null);
       
-      // 只在創建新對話成功後更新歷史列表
-      const historyResponse = await axios.get(`${API_URL}/api/history`);
-      const sortedHistories = historyResponse.data.sort((a: ChatHistory, b: ChatHistory) => 
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      setChatHistories(sortedHistories);
+      // 更新歷史列表
+      await fetchChatHistories();
     } catch (error) {
       console.error('創建新對話失敗:', error);
       setError('創建新對話失敗');
