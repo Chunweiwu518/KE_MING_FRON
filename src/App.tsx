@@ -107,7 +107,6 @@ function App() {
   // const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
-  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
   const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
 
   // 載入歷史對話
@@ -475,23 +474,6 @@ function App() {
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
       setError(null);
-    }
-  }
-
-  const removeFile = async (index: number) => {
-    const fileToRemove = files[index]
-    try {
-      await axios.delete(`${API_URL}/api/files/${fileToRemove.name}`)
-      setFiles(prev => prev.filter((_, i) => i !== index))
-      // 手動刷新知識庫統計
-      await loadVectorStoreStats()
-    } catch (error) {
-      console.error('Delete error:', error)
-      if (axios.isAxiosError(error)) {
-        setError(`刪除檔案失敗: ${error.response?.data?.detail || error.message}`)
-      } else {
-        setError('刪除檔案時發生未知錯誤')
-      }
     }
   }
 
