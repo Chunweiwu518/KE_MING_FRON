@@ -133,22 +133,32 @@ function App() {
 
   const loadChatHistory = async (chatId: string) => {
     try {
-      setIsLoading(true)
-      const response = await axios.get(`${API_URL}/api/history/${chatId}`)
+      setIsLoading(true);
+      
+      // 如果當前有對話且有消息，先保存當前對話
+      if (currentChatId && messages.length > 0) {
+        await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+          messages: messages,
+          title: messages[0]?.content.slice(0, 30) + '...' || '新對話'
+        });
+      }
+      
+      // 載入選擇的對話歷史
+      const response = await axios.get(`${API_URL}/api/history/${chatId}`);
       if (response.data && response.data.messages) {
-        setMessages(response.data.messages)
-        setCurrentChatId(chatId)
-        setError(null)
+        setMessages(response.data.messages);
+        setCurrentChatId(chatId);
+        setError(null);
       } else {
-        setError('對話歷史格式不正確')
+        setError('對話歷史格式不正確');
       }
     } catch (error) {
-      console.error('Failed to load chat history:', error)
-      setError('載入對話歷史失敗')
+      console.error('Failed to load chat history:', error);
+      setError('載入對話歷史失敗');
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   // 新對話按鈕
   const startNewChat = async () => {
