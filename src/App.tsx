@@ -888,45 +888,14 @@ function App() {
             </div>
           </div>
 
-          {/* 文件上傳區域 */}
+          {/* 新對話按鈕 */}
           <div className="p-4 border-b border-gray-200">
-            <h2 className="text-sm font-medium mb-2 text-gray-700">上傳文件</h2>
-            <div className="flex flex-col space-y-2">
-              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <span className="mt-1 text-sm">選擇檔案</span>
-                <input type="file" className="hidden" accept=".txt,.pdf,.docx" multiple onChange={handleFileUpload} disabled={isLoading} />
-              </label>
-              
-              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-                <span className="mt-1 text-sm">選擇資料夾</span>
-                <input 
-                  type="file" 
-                  ref={folderInputRef}
-                  webkitdirectory="true" 
-                  directory="true"
-                  multiple 
-                  className="hidden" 
-                  onChange={handleFolderUpload} 
-                  disabled={isLoading} 
-                  {...{} as ExtendedInputHTMLAttributes}
-                />
-              </label>
-              
-              <div className="mt-4">
-                <button
-                  onClick={clearVectorStore}
-                  className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
-                >
-                  清空知識庫
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={startNewChat}
+              className="w-full py-2 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              開始新對話
+            </button>
           </div>
 
           {/* 對話歷史列表 */}
@@ -965,14 +934,45 @@ function App() {
             </div>
           </div>
 
-          {/* 新對話按鈕 */}
+          {/* 文件上傳區域 */}
           <div className="p-4 border-t border-gray-200">
-            <button
-              onClick={startNewChat}
-              className="w-full py-2 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              開始新對話
-            </button>
+            <h2 className="text-sm font-medium mb-2 text-gray-700">上傳文件</h2>
+            <div className="flex flex-col space-y-2">
+              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span className="mt-1 text-sm">選擇檔案</span>
+                <input type="file" className="hidden" accept=".txt,.pdf,.docx" multiple onChange={handleFileUpload} disabled={isLoading} />
+              </label>
+              
+              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <span className="mt-1 text-sm">選擇資料夾</span>
+                <input 
+                  type="file" 
+                  ref={folderInputRef}
+                  webkitdirectory="true" 
+                  directory="true"
+                  multiple 
+                  className="hidden" 
+                  onChange={handleFolderUpload} 
+                  disabled={isLoading} 
+                  {...{} as ExtendedInputHTMLAttributes}
+                />
+              </label>
+              
+              <div className="mt-4">
+                <button
+                  onClick={clearVectorStore}
+                  className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
+                >
+                  清空知識庫
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* 知識庫狀態顯示 */}
