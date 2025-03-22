@@ -56,7 +56,7 @@ interface FileInfo {
   uploadTime?: string;
   webkitRelativePath?: string;
   type?: string;
-  status?: 'uploading' | 'success' | 'error';
+  status?: 'uploading' | 'success' | 'error' | string;
   errorMessage?: string;
 }
 
@@ -778,6 +778,49 @@ function App() {
                   清空知識庫
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* 添加已上傳檔案列表 */}
+          <div className="p-4 border-b border-gray-200">
+            <h2 className="text-sm font-medium mb-2 text-gray-700">已上傳檔案</h2>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {files.map((file, index) => (
+                <div key={file.name} className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200 text-sm">
+                  <div className="truncate flex-1">
+                    {file.status ? (
+                      <div className="flex items-center">
+                        {file.status === 'uploading' && (
+                          <span className="mr-1 w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></span>
+                        )}
+                        {file.status === 'success' && (
+                          <span className="mr-1 w-3 h-3 bg-green-500 rounded-full"></span>
+                        )}
+                        {file.status === 'error' && (
+                          <span className="mr-1 w-3 h-3 bg-red-500 rounded-full"></span>
+                        )}
+                        <span>{file.display_name || file.name}</span>
+                      </div>
+                    ) : (
+                      file.display_name || file.name
+                    )}
+                  </div>
+                  <button
+                    onClick={() => removeFile(index)}
+                    className="ml-2 text-red-400 hover:text-red-600"
+                    title="刪除文件"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              {files.length === 0 && (
+                <div className="text-center text-gray-500 text-xs py-2">
+                  尚未上傳任何檔案
+                </div>
+              )}
             </div>
           </div>
 
