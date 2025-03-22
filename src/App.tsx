@@ -137,10 +137,17 @@ function App() {
       
       // 如果當前有對話且有消息，先保存當前對話
       if (currentChatId && messages.length > 0) {
-        await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+        const updateRequest = {
           messages: messages,
-          title: messages[0]?.content.slice(0, 30) + '...' || '新對話'
-        });
+          title: messages[0]?.content.slice(0, 30) + '...'
+        };
+        
+        try {
+          await axios.put(`${API_URL}/api/history/${currentChatId}`, updateRequest);
+          console.log('當前對話已保存');
+        } catch (error) {
+          console.error('保存當前對話失敗:', error);
+        }
       }
       
       // 載入選擇的對話歷史
@@ -149,6 +156,9 @@ function App() {
         setMessages(response.data.messages);
         setCurrentChatId(chatId);
         setError(null);
+        
+        // 更新歷史列表
+        await fetchChatHistories();
       } else {
         setError('對話歷史格式不正確');
       }
@@ -165,6 +175,21 @@ function App() {
     console.log('開始新對話，重置狀態');
     
     try {
+      // 如果當前有對話且有消息，先保存當前對話
+      if (currentChatId && messages.length > 0) {
+        const updateRequest = {
+          messages: messages,
+          title: messages[0]?.content.slice(0, 30) + '...'
+        };
+        
+        try {
+          await axios.put(`${API_URL}/api/history/${currentChatId}`, updateRequest);
+          console.log('當前對話已保存');
+        } catch (error) {
+          console.error('保存當前對話失敗:', error);
+        }
+      }
+
       // 先重置狀態
       setMessages([]);
       setError(null);
