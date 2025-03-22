@@ -107,9 +107,6 @@ function App() {
     files: [],
     is_empty: true
   })
-  // 未使用的狀態變數 - 暫時註釋
-  // const [showAddChat, setShowAddChat] = useState(false)
-  // const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
   const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
@@ -850,16 +847,6 @@ function App() {
     
     return () => clearInterval(intervalId);
   }, [files]); // 當文件列表變化時重新加載
-
-  // 新增/更新對話歷史
-  // const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
-  //   // 實現保存或更新聊天歷史的邏輯
-  // }
-
-  // 創建新的對話歷史
-  // const createNewChatHistory = async (messages: Message[], title?: string) => {
-  //   // 實現創建新對話歷史的邏輯
-  // }
 
   // 新對話按鈕
   const startNewChat = () => {
