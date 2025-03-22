@@ -135,8 +135,13 @@ function App() {
     try {
       setIsLoading(true)
       const response = await axios.get(`${API_URL}/api/history/${chatId}`)
-      setMessages(response.data.messages)
-      setCurrentChatId(chatId)
+      if (response.data && response.data.messages) {
+        setMessages(response.data.messages)
+        setCurrentChatId(chatId)
+        setError(null)
+      } else {
+        setError('對話歷史格式不正確')
+      }
     } catch (error) {
       console.error('Failed to load chat history:', error)
       setError('載入對話歷史失敗')
@@ -366,7 +371,10 @@ function App() {
                   }`}
                 >
                   <button
-                    onClick={() => loadChatHistory(chat.id)}
+                    onClick={() => {
+                      console.log('載入對話歷史:', chat.id);
+                      loadChatHistory(chat.id);
+                    }}
                     className="flex-1 text-left"
                   >
                     <div className="truncate text-sm text-gray-800">{chat.title}</div>
