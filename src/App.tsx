@@ -153,12 +153,17 @@ function App() {
   // 新對話按鈕
   const startNewChat = async () => {
     console.log('開始新對話，重置狀態');
-    setMessages([]);
-    setCurrentChatId(null);
-    setError(null);
-
+    
     try {
-      // 立即創建新的對話歷史
+      // 如果當前有對話，先保存到歷史記錄
+      if (currentChatId && messages.length > 0) {
+        await axios.post(`${API_URL}/api/history`, {
+          messages: messages,
+          title: messages[0].content.slice(0, 30) + '...'
+        });
+      }
+
+      // 創建新的對話歷史
       const response = await axios.post(`${API_URL}/api/history`, {
         messages: [],
         title: '新對話'
@@ -166,6 +171,8 @@ function App() {
       
       console.log('新對話創建成功:', response.data.id);
       setCurrentChatId(response.data.id);
+      setMessages([]);
+      setError(null);
       await fetchChatHistories(); // 重新獲取對話列表
     } catch (error) {
       console.error('創建新對話失敗:', error);
@@ -193,9 +200,19 @@ function App() {
       sources: []
     }
 
-    setMessages(prev => [...prev, newMessage, assistantMessage])
+    const updatedMessages = [...messages, newMessage, assistantMessage]
+    setMessages(updatedMessages)
 
     try {
+      // 如果沒有當前對話ID，創建一個新的
+      if (!currentChatId) {
+        const historyResponse = await axios.post(`${API_URL}/api/history`, {
+          messages: updatedMessages,
+          title: currentInput.slice(0, 30) + '...'
+        });
+        setCurrentChatId(historyResponse.data.id);
+      }
+
       const response = await fetch(`${API_URL}/api/chat/stream`, {
         method: 'POST',
         headers: {
