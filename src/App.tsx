@@ -9,6 +9,11 @@ interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInpu
 
 // 文本格式化函數
 const formatText = (text: string): string => {
+  // 如果文本包含 [SOURCES] 標記，則不進行格式化
+  if (text.includes('[SOURCES]')) {
+    return text;
+  }
+
   // 替換產品規格的格式
   let formattedText = text
     // 保留換行符
@@ -32,71 +37,6 @@ const formatText = (text: string): string => {
   }
 
   return formattedText
-}
-
-// 添加用於格式化來源內容的函數
-const formatSourceContent = (content: string): string => {
-  if (!content) return '';
-  
-  try {
-    // 如果內容是 JSON 字符串，嘗試解析
-    try {
-      const parsed = JSON.parse(content);
-      if (parsed.content) {
-        return parsed.content;
-      }
-    } catch (e) {
-      // 如果不是有效的 JSON，繼續處理
-    }
-
-    // 移除 [SOURCES] 標記
-    let cleanedContent = content
-      .replace('[SOURCES]', '')
-      .replace('[/SOURCES]', '')
-      .trim();
-
-    // 嘗試提取 content 字段
-    const contentMatch = cleanedContent.match(/"content":"([^"]+)"/);
-    if (contentMatch) {
-      cleanedContent = contentMatch[1];
-    }
-
-    // 解碼 Unicode 轉義序列
-    cleanedContent = cleanedContent.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
-      String.fromCharCode(parseInt(hex, 16))
-    );
-
-    // 清理其他轉義字符
-    cleanedContent = cleanedContent
-      .replace(/\\n/g, '\n')
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\')
-      .replace(/\\t/g, '\t');
-
-    // 移除多餘的反斜線
-    cleanedContent = cleanedContent.replace(/\\/g, '');
-
-    // 如果內容以引號開始和結束，去除引號
-    if ((cleanedContent.startsWith('"') && cleanedContent.endsWith('"')) || 
-        (cleanedContent.startsWith("'") && cleanedContent.endsWith("'"))) {
-      cleanedContent = cleanedContent.substring(1, cleanedContent.length - 1);
-    }
-
-    // 移除任何剩餘的 JSON 或特殊格式標記
-    cleanedContent = cleanedContent
-      .replace(/"metadata":\{[^}]+\}/g, '')
-      .replace(/"extraction_method":"[^"]+"/g, '')
-      .replace(/"filename":"[^"]+"/g, '')
-      .replace(/"score":[^,}]+/g, '')
-      .replace(/"page_info":\{[^}]+\}/g, '')
-      .replace(/\{|\}/g, '')
-      .trim();
-
-    return cleanedContent || '無法顯示內容';
-  } catch (error) {
-    console.error('格式化來源內容時出錯:', error);
-    return '內容格式錯誤';
-  }
 }
 
 // 根據文本內容返回適當的CSS類
@@ -172,6 +112,7 @@ function App() {
   // const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
+  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
   const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
 
   // 載入歷史對話
@@ -290,34 +231,35 @@ function App() {
       // 處理流式數據
       while (true) {
         const { done, value } = await reader.read()
+        
         if (done) break
         
-        // 將二進制數據解碼為文本
-        const text = decoder.decode(value, { stream: true })
+        const chunk = decoder.decode(value)
+        const lines = chunk.split('\n')
         
-        // 處理SSE格式的數據行
-        const lines = text.split('\n\n')
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+          if (!line.trim() || !line.startsWith('data: ')) continue
           
-          const data = line.substring(6) // 去掉 "data: " 前綴
+          const data = line.slice(5)
           
-          // 檢測特殊標記
+          // 檢測來源信息
           if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
-            // 解析來源數據
-            const sourcesData = data.replace('[SOURCES]', '').replace('[/SOURCES]', '')
             try {
-              sources = JSON.parse(sourcesData)
-            } catch (e) {
-              console.error('解析來源數據失敗:', e)
+              const sourcesJson = data.slice(9, -10) // 移除 [SOURCES] 和 [/SOURCES] 標記
+              sources = JSON.parse(sourcesJson)
+            } catch (error) {
+              console.error('解析來源信息時出錯:', error)
             }
-          } 
+            continue
+          }
+          
           // 檢測錯誤信息
           else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
             const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
             setError(`聊天請求失敗: ${errorMsg}`)
             break
           }
+          
           // 檢測結束標記
           else if (data === '[DONE]') {
             // 更新最終的助手消息，包括來源
@@ -334,52 +276,32 @@ function App() {
                   break
                 }
               }
-              
-              // 只有在這是新對話且尚未處理過時，才保存歷史
-              if (isNewChat && !conversationProcessed && updatedMessages.length >= 2) {
-                // 標記為已處理
-                conversationProcessed = true;
-                console.log('流處理完成，準備保存對話歷史');
-                
-                // 使用setTimeout確保當前狀態更新完畢後再保存歷史
-                setTimeout(() => {
-                  // 再次檢查沒有currentChatId才創建新對話
-                  if (!currentChatId) {
-                    saveOrUpdateChatHistory(
-                      updatedMessages, 
-                      currentInput.slice(0, 20) + "..."
-                    );
-                  }
-                }, 100);
-              }
-              
               return updatedMessages
             })
             break
-          } 
+          }
+          
           // 一般情況：處理正常的字符
           else {
-            tempResponse += data
-            // 更新助手消息的內容
-            setMessages(prev => {
-              const updatedMessages = [...prev]
-              // 尋找並更新最新的助手消息
-              for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                if (updatedMessages[i].role === 'assistant') {
-                  updatedMessages[i] = {
-                    ...updatedMessages[i],
-                    content: tempResponse
+            // 如果不是特殊標記，則添加到臨時響應中
+            if (!data.includes('[SOURCES]') && !data.includes('[ERROR]') && data !== '[DONE]') {
+              tempResponse += data
+              // 更新助手消息的內容
+              setMessages(prev => {
+                const updatedMessages = [...prev]
+                // 尋找並更新最新的助手消息
+                for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                  if (updatedMessages[i].role === 'assistant') {
+                    updatedMessages[i] = {
+                      ...updatedMessages[i],
+                      content: tempResponse
+                    }
+                    break
                   }
-                  break
                 }
-              }
-              return updatedMessages
-            })
-
-            // 增加一個小延遲再滾動，確保DOM已更新
-            setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-            }, 10);
+                return updatedMessages
+              })
+            }
           }
         }
       }
@@ -539,6 +461,23 @@ function App() {
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
       setError(null);
+    }
+  }
+
+  const removeFile = async (index: number) => {
+    const fileToRemove = files[index]
+    try {
+      await axios.delete(`${API_URL}/api/files/${fileToRemove.name}`)
+      setFiles(prev => prev.filter((_, i) => i !== index))
+      // 手動刷新知識庫統計
+      await loadVectorStoreStats()
+    } catch (error) {
+      console.error('Delete error:', error)
+      if (axios.isAxiosError(error)) {
+        setError(`刪除檔案失敗: ${error.response?.data?.detail || error.message}`)
+      } else {
+        setError('刪除檔案時發生未知錯誤')
+      }
     }
   }
 
@@ -1221,52 +1160,31 @@ function App() {
                 return null;
               }
               
-              // 過濾掉空內容的來源
-              const validSources = lastMessage.sources.filter(source => {
-                const content = formatSourceContent(source.content);
-                return content && content !== '無法顯示內容' && content !== '內容格式錯誤';
-              });
-              
-              if (validSources.length === 0) return null;
-              
               // 如果所有條件都滿足，顯示來源
               return (
                 <div className="max-w-3xl mx-auto mt-2">
                   <details className="bg-gray-50 rounded-lg border border-gray-200">
-                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                      引用來源 ({validSources.length})
+                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
+                      查看引用來源 ({lastMessage.sources.length})
                     </summary>
                     <div className="p-4 space-y-3">
-                      {validSources.map((source, sourceIndex) => {
-                        const formattedContent = formatSourceContent(source.content);
-                        if (!formattedContent) return null;
-                        
-                        return (
-                          <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm hover:border-purple-200 transition-colors">
-                            <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100">
-                              <span className="text-gray-700 font-medium flex items-center">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                {source.metadata.source.split('/').pop()}
+                      {lastMessage.sources.map((source, sourceIndex) => (
+                        <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-gray-700 font-medium">
+                              文件：{source.metadata.source}
+                            </span>
+                            {source.metadata.page !== undefined && (
+                              <span className="text-gray-500 text-xs">
+                                第 {source.metadata.page} 頁
                               </span>
-                              {source.metadata.page !== undefined && (
-                                <span className="text-gray-500 text-xs px-2 py-1 bg-gray-50 rounded">
-                                  第 {source.metadata.page} 頁
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-gray-700 text-sm leading-relaxed pl-2 border-l-2 border-gray-100">
-                              {formattedContent.split('\n').map((line, i) => (
-                                <p key={i} className="mb-1">{line}</p>
-                              ))}
-                            </div>
+                            )}
                           </div>
-                        );
-                      })}
+                          <p className="text-gray-700 text-sm whitespace-pre-wrap">
+                            {source.content}
+                          </p>
+                        </div>
+                      ))}
                     </div>
                   </details>
                 </div>
