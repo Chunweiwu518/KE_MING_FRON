@@ -34,6 +34,45 @@ const formatText = (text: string): string => {
   return formattedText
 }
 
+// 添加用於格式化來源內容的函數
+const formatSourceContent = (content: string): string => {
+  if (!content) return '';
+  
+  try {
+    // 檢查是否為JSON字符串並嘗試解析
+    if (content.startsWith('{') && content.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(content);
+        return parsed.content || content;
+      } catch (e) {
+        // 解析失敗，繼續處理
+      }
+    }
+    
+    // 嘗試解碼Unicode轉義序列
+    const decodedContent = content.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
+      String.fromCharCode(parseInt(hex, 16))
+    );
+    
+    // 如果內容以引號開始和結束，去除引號
+    let cleanedContent = decodedContent;
+    if ((cleanedContent.startsWith('"') && cleanedContent.endsWith('"')) || 
+        (cleanedContent.startsWith("'") && cleanedContent.endsWith("'"))) {
+      cleanedContent = cleanedContent.substring(1, cleanedContent.length - 1);
+    }
+    
+    // 移除雙反斜槓和特殊格式
+    cleanedContent = cleanedContent.replace(/\\n/g, '\n')
+                                  .replace(/\\"/g, '"')
+                                  .replace(/\\\\/g, '\\');
+    
+    return cleanedContent;
+  } catch (error) {
+    console.error('格式化來源內容時出錯:', error);
+    return content; // 發生錯誤時返回原始內容
+  }
+}
+
 // 根據文本內容返回適當的CSS類
 const getMessageStyle = (content: string, role: 'user' | 'assistant'): string => {
   if (role === 'user') {
@@ -1177,7 +1216,7 @@ function App() {
                             )}
                           </div>
                           <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                            {source.content}
+                            {formatSourceContent(source.content)}
                           </p>
                         </div>
                       ))}
