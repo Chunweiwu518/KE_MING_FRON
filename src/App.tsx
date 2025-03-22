@@ -1,12 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
 
-// 定義擴展的 Input 屬性類型
-interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInputElement> {
-  webkitdirectory?: string;
-  directory?: string;
-}
-
 // 文本格式化函數
 const formatText = (text: string): string => {
   // 如果文本包含 [SOURCES] 標記，則不進行格式化
@@ -53,19 +47,6 @@ const getMessageStyle = (content: string, role: 'user' | 'assistant'): string =>
   return 'bg-gray-100 text-gray-800'
 }
 
-interface FileInfo {
-  name: string;
-  display_name?: string;
-  size?: number;
-  lastModified?: number;
-  uploadTime?: string;
-  webkitRelativePath?: string;
-  type?: string;
-  status?: 'uploading' | 'success' | 'error' | string;
-  errorMessage?: string;
-  progress?: number;
-}
-
 interface Source {
   content: string
   metadata: {
@@ -83,47 +64,40 @@ interface Message {
 interface ChatHistory {
   id: string
   title: string
-  messages: Message[]
   createdAt: string
+  messages: Message[]
 }
 
 interface VectorStoreStats {
-  total_chunks: number;
-  unique_files: number;
-  files: string[];
-  is_empty: boolean;
+  total_chunks: number
+  unique_files: number
+  files: string[]
+  is_empty: boolean
 }
 
 interface UsageStats {
   monthly_tokens: {
-    used: number;
-    total: number;
-  };
+    used: number
+    total: number
+  }
   daily_api_calls: {
-    count: number;
-    limit: number;
-  };
-  average_response_time: number;
-  system_status: 'normal' | 'warning' | 'error';
+    count: number
+    limit: number
+  }
+  average_response_time: number
+  system_status: 'normal' | 'warning' | 'error'
 }
 
-const API_URL = import.meta.env.VITE_API_URL
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [files, setFiles] = useState<FileInfo[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
-  const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
-  const [totalUploadProgress, setTotalUploadProgress] = useState(0)
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const folderInputRef = useRef<HTMLInputElement>(null)
   const [vectorStoreStats, setVectorStoreStats] = useState<VectorStoreStats>({
     total_chunks: 0,
     unique_files: 0,
@@ -142,6 +116,8 @@ function App() {
     average_response_time: 0,
     system_status: 'normal'
   })
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // 載入歷史對話
   useEffect(() => {
@@ -152,17 +128,6 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  // 獲取已上傳的檔案列表
-  const fetchUploadedFiles = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/files`)
-      setFiles(response.data)
-      console.log('已獲取上傳檔案列表:', response.data.length)
-    } catch (error) {
-      console.error('獲取上傳檔案列表失敗:', error)
-    }
-  }
 
   const fetchChatHistories = async () => {
     try {
@@ -317,153 +282,6 @@ function App() {
     }
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    
-    setIsLoading(true);
-    setShowUploadedFiles(true);
-    setTotalUploadProgress(0);
-    let uploadSuccess = false;
-    
-    // 清除之前的錯誤
-    setError(null);
-    
-    // 處理每個選擇的文件
-    const selectedFiles = Array.from(e.target.files);
-    
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
-      
-      // 更新總體進度指示器 - 顯示當前處理的檔案索引
-      setTotalUploadProgress(Math.round(((i) / selectedFiles.length) * 100));
-      
-      // 生成臨時ID以便追蹤上傳狀態
-      const tempFileId = Math.random().toString(36).substring(2, 10);
-      
-      // 添加到文件列表(帶上傳狀態)
-      setFiles(prev => [...prev, {
-        name: tempFileId,
-        display_name: file.name,
-        size: file.size,
-        status: 'uploading',
-        progress: 0 // 初始進度為0
-      }]);
-      
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // 添加處理選項
-        formData.append('use_openai_ocr', 'true');  // 是否使用OpenAI Vision
-        formData.append('page_by_page', 'true');    // 逐頁處理
-        formData.append('batch_size', '10');        // 批次大小
-        
-        // 顯示上傳進度
-        console.log(`開始上傳文件: ${file.name} (${i+1}/${selectedFiles.length})`);
-        
-        // 使用 axios 進度追蹤功能
-        const response = await axios.post(`${API_URL}/api/upload`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          onUploadProgress: (progressEvent) => {
-            const filePercentCompleted = progressEvent.total 
-              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
-              : 0;
-              
-            // 更新檔案進度
-            setFiles(prev => prev.map(f => {
-              if (f.name === tempFileId) {
-                return {
-                  ...f,
-                  progress: filePercentCompleted
-                };
-              }
-              return f;
-            }));
-            
-            // 更新全局進度 - 結合當前檔案進度和整體進度
-            const overallProgress = Math.round(
-              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / selectedFiles.length) * 100
-            );
-            setTotalUploadProgress(overallProgress);
-          }
-        });
-        
-        // 更新上傳成功的狀態
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            const processedFile = {
-              ...f,
-              status: 'success',
-              progress: 100
-            };
-            // 延遲移除上傳狀態標記
-            setTimeout(() => {
-              setFiles(curr => curr.map(cf => {
-                if (cf.name === tempFileId) {
-                  const { status, progress, ...rest } = cf;
-                  return rest;
-                }
-                return cf;
-              }));
-            }, 2000);
-            return processedFile;
-          }
-          return f;
-        }));
-        
-        uploadSuccess = true;
-        console.log(`文件 ${file.name} 上傳成功:`, response.data);
-        
-        // 每個文件上傳成功後立即刷新知識庫統計
-        await loadVectorStoreStats();
-      } catch (error) {
-        console.error(`文件 ${file.name} 上傳失敗:`, error);
-        
-        // 更新文件狀態為錯誤
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            return {
-              ...f,
-              status: 'error',
-              progress: 0,
-              errorMessage: '上傳失敗'
-            };
-          }
-          return f;
-        }));
-        
-        setError(`文件 ${file.name} 上傳失敗`);
-      }
-    }
-    
-    // 最後設置總體進度為100%
-    setTotalUploadProgress(100);
-    
-    // 如果至少有一個文件上傳成功，則重新獲取文件列表
-    if (uploadSuccess) {
-      await fetchUploadedFiles();
-      
-      // 顯示上傳成功提示
-      setShowUploadSuccess(true);
-      setTimeout(() => {
-        setShowUploadSuccess(false);
-      }, 3000);
-    }
-    
-    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
-    setTimeout(() => {
-      setIsLoading(false);
-      setShowUploadedFiles(false);
-    }, 500);
-    
-    // 如果沒有錯誤提示，清除錯誤狀態
-    if (!files.some(f => f.status === 'error')) {
-      setError(null);
-    }
-  }
-
   const deleteHistory = async (chatId: string) => {
     try {
       await axios.delete(`${API_URL}/api/history/${chatId}`)
@@ -475,195 +293,6 @@ function App() {
     } catch (error) {
       console.error('Delete history error:', error)
       setError('刪除對話歷史失敗')
-    }
-  }
-
-  // 修改 clearVectorStore 函數確保能徹底清空
-  const clearVectorStore = async () => {
-    if (!confirm('確定要清空知識庫嗎？此操作將刪除所有已學習的知識，且無法恢復。')) {
-      return
-    }
-    
-    setIsLoading(true)
-    setError('正在清空知識庫...')
-    
-    try {
-      await axios.delete(`${API_URL}/api/vector-store/clear`)
-      // 清空後重新獲取檔案列表
-      await fetchUploadedFiles()
-      setError(null)
-      await loadVectorStoreStats()
-    } catch (error) {
-      console.error('Clear vector store error:', error)
-      if (axios.isAxiosError(error)) {
-        setError(`清空知識庫失敗: ${error.response?.data?.detail || error.message}`)
-      } else {
-        setError('清空知識庫時發生未知錯誤')
-      }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // 處理資料夾上傳
-  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadFiles = e.target.files
-    if (!uploadFiles || uploadFiles.length === 0) return
-
-    setIsLoading(true)
-    setShowUploadedFiles(true)
-    setTotalUploadProgress(0)
-    setError('正在處理資料夾中的文件...')
-
-    let uploadedCount = 0
-    let failedCount = 0
-    let uploadSuccess = false
-    
-    // 過濾支持的檔案類型
-    const supportedFiles = Array.from(uploadFiles).filter(file => {
-      const fileExt = file.name.toLowerCase().split('.').pop()
-      return ['txt', 'pdf', 'docx'].includes(fileExt || '')
-    })
-    
-    if (supportedFiles.length === 0) {
-      setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
-      setIsLoading(false)
-      setShowUploadedFiles(false)
-      return
-    }
-
-    // 處理所有文件
-    for (let i = 0; i < supportedFiles.length; i++) {
-      const file = supportedFiles[i]
-      
-      // 更新總體進度指示器
-      setTotalUploadProgress(Math.round(((i) / supportedFiles.length) * 100));
-      
-      // 添加一個臨時文件項，狀態為上傳中
-      const tempFileId = `folder_${Date.now()}_${i}`; // 創建一個臨時ID
-      const tempFile: FileInfo = { 
-        name: tempFileId,
-        display_name: file.name,
-        size: file.size,
-        status: 'uploading',
-        progress: 0
-      };
-      
-      setFiles(prev => [...prev, tempFile]);
-      
-      try {
-        const individualFormData = new FormData()
-        individualFormData.append('file', file)
-        
-        console.log(`開始上傳資料夾文件: ${file.name} (${i+1}/${supportedFiles.length})`)
-        
-        // 使用 axios 進度追蹤功能
-        await axios.post(`${API_URL}/api/upload`, individualFormData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          onUploadProgress: (progressEvent) => {
-            const filePercentCompleted = progressEvent.total 
-              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
-              : 0;
-              
-            // 更新檔案進度
-            setFiles(prev => prev.map(f => {
-              if (f.name === tempFileId) {
-                return {
-                  ...f,
-                  progress: filePercentCompleted
-                };
-              }
-              return f;
-            }));
-            
-            // 更新全局進度 - 結合當前檔案進度和整體進度
-            const overallProgress = Math.round(
-              ((i + (progressEvent.loaded / (progressEvent.total || 1))) / supportedFiles.length) * 100
-            );
-            setTotalUploadProgress(overallProgress);
-          }
-        })
-        
-        // 更新為成功狀態
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            const successFile = {
-              ...f,
-              status: 'success',
-              progress: 100
-            };
-            
-            // 延遲移除狀態標記
-            setTimeout(() => {
-              setFiles(curr => curr.map(cf => {
-                if (cf.name === tempFileId) {
-                  const { status, progress, ...rest } = cf;
-                  return rest;
-                }
-                return cf;
-              }));
-            }, 2000);
-            
-            return successFile;
-          }
-          return f;
-        }));
-        
-        uploadedCount++
-        uploadSuccess = true
-      } catch (error) {
-        console.error(`上傳文件失敗: ${file.name}`, error)
-        
-        // 更新文件狀態為錯誤
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            return {
-              ...f,
-              status: 'error',
-              progress: 0,
-              errorMessage: '上傳失敗'
-            };
-          }
-          return f;
-        }));
-        
-        failedCount++
-      }
-    }
-    
-    // 設置最終進度為100%
-    setTotalUploadProgress(100)
-
-    // 如果至少有一個文件上傳成功，則重新獲取文件列表
-    if (uploadSuccess) {
-      await fetchUploadedFiles()
-      
-      // 顯示上傳成功提示
-      setShowUploadSuccess(true);
-      setTimeout(() => {
-        setShowUploadSuccess(false);
-      }, 3000);
-    }
-    
-    // 稍微延遲關閉上傳狀態，讓用戶可以看到100%的進度
-    setTimeout(() => {
-      setIsLoading(false)
-      setShowUploadedFiles(false)
-    }, 500)
-    
-    if (failedCount > 0) {
-      setError(`${uploadedCount} 個文件上傳成功，${failedCount} 個文件失敗`)
-    } else if (uploadedCount === 0) {
-      setError('沒有找到支持的文件類型 (PDF, TXT, DOCX)')
-    } else {
-      setError(null)
-    }
-    
-    // 重置 input 控件，允許再次選擇相同文件
-    if (folderInputRef.current) {
-      folderInputRef.current.value = ''
     }
   }
 
@@ -679,7 +308,6 @@ function App() {
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    // 由於我們已經移除了文件上傳功能，這裡只需要防止瀏覽器默認行為
   }
 
   // 添加加載統計信息的函數
@@ -831,16 +459,6 @@ function App() {
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* 上傳成功提示 */}
-      {showUploadSuccess && (
-        <div className="fixed top-4 right-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded z-50 shadow-md flex items-center">
-          <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-          <span>上傳成功！</span>
-        </div>
-      )}
-      
       {/* 側邊欄 */}
       <div 
         className={`fixed inset-y-0 left-0 bg-gray-50 border-r border-gray-200 transition-all duration-300 z-10 ${
@@ -931,19 +549,6 @@ function App() {
               </svg>
             </button>
             <h1 className="ml-4 text-lg font-medium text-gray-800">RAG 知識庫問答</h1>
-            
-            {/* 全局上傳進度指示器 */}
-            {showUploadedFiles && (
-              <div className="ml-auto flex items-center">
-                <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden mr-2">
-                  <div 
-                    className="h-full bg-blue-500 rounded-full transition-all duration-300" 
-                    style={{ width: `${totalUploadProgress}%` }}
-                  ></div>
-                </div>
-                <span className="text-sm text-gray-500">{totalUploadProgress}%</span>
-              </div>
-            )}
           </div>
         </div>
         
