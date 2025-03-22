@@ -189,9 +189,6 @@ function App() {
       sources: []
     }
 
-    // 檢查是否需要創建新對話
-    const isNewChat = !currentChatId
-
     // 將用戶消息和初始的空助手消息加入到聊天記錄
     setMessages(prev => [...prev, newMessage, assistantMessage])
 
@@ -211,9 +208,6 @@ function App() {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-
-      // 表示我們處理過這個對話的請求，避免重複保存
-      let conversationProcessed = false;
 
       const reader = response.body?.getReader()
       if (!reader) {
