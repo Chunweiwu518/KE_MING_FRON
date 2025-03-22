@@ -58,6 +58,7 @@ interface FileInfo {
   type?: string;
   status?: 'uploading' | 'success' | 'error' | string;
   errorMessage?: string;
+  progress?: number;
 }
 
 interface Source {
@@ -101,6 +102,8 @@ function App() {
     files: [],
     is_empty: true
   })
+  const [uploading, setUploading] = useState(false)
+  const [totalUploadProgress, setTotalUploadProgress] = useState(0)
 
   // 載入歷史對話
   useEffect(() => {
@@ -585,6 +588,8 @@ function App() {
     if (droppedFiles.length === 0) return
     
     setIsLoading(true)
+    setUploading(true)
+    setTotalUploadProgress(0)
     setError('正在處理文件...')
     let uploadSuccess = false
     
@@ -604,7 +609,8 @@ function App() {
         name: tempFileId,
         display_name: file.name,
         size: file.size,
-        status: 'uploading'
+        status: 'uploading',
+        progress: 0
       };
       
       setFiles(prev => [...prev, tempFile]);
@@ -616,11 +622,53 @@ function App() {
         await axios.post(`${API_URL}/api/upload`, dropFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
+          },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = progressEvent.total 
+              ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              : 0;
+              
+            // 更新檔案進度
+            setFiles(prev => prev.map(f => {
+              if (f.name === tempFileId) {
+                return {
+                  ...f,
+                  progress: percentCompleted
+                };
+              }
+              return f;
+            }));
+            
+            // 更新全局進度
+            setTotalUploadProgress(percentCompleted);
           }
         })
         
-        // 上傳成功，移除臨時文件
-        setFiles(prev => prev.filter(f => f.name !== tempFileId));
+        // 更新為成功狀態
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            const successFile = {
+              ...f,
+              status: 'success',
+              progress: 100
+            };
+            
+            // 延遲移除狀態標記
+            setTimeout(() => {
+              setFiles(curr => curr.map(cf => {
+                if (cf.name === tempFileId) {
+                  const { status, progress, ...rest } = cf;
+                  return rest;
+                }
+                return cf;
+              }));
+            }, 2000);
+            
+            return successFile;
+          }
+          return f;
+        }));
+        
         uploadSuccess = true
       } catch (error) {
         console.error('文件上傳失敗:', error)
@@ -631,6 +679,7 @@ function App() {
             return {
               ...f,
               status: 'error',
+              progress: 0,
               errorMessage: '上傳失敗'
             };
           }
@@ -647,6 +696,8 @@ function App() {
     }
     
     setIsLoading(false)
+    setUploading(false)
+    
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
       setError(null)
@@ -786,34 +837,51 @@ function App() {
             <h2 className="text-sm font-medium mb-2 text-gray-700">已上傳檔案</h2>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {files.map((file, index) => (
-                <div key={file.name} className="flex items-center justify-between bg-white p-2 rounded-lg border border-gray-200 text-sm">
-                  <div className="truncate flex-1">
-                    {file.status ? (
-                      <div className="flex items-center">
-                        {file.status === 'uploading' && (
-                          <span className="mr-1 w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></span>
-                        )}
-                        {file.status === 'success' && (
-                          <span className="mr-1 w-3 h-3 bg-green-500 rounded-full"></span>
-                        )}
-                        {file.status === 'error' && (
-                          <span className="mr-1 w-3 h-3 bg-red-500 rounded-full"></span>
-                        )}
-                        <span>{file.display_name || file.name}</span>
-                      </div>
-                    ) : (
-                      file.display_name || file.name
-                    )}
+                <div key={file.name} className="flex flex-col bg-white p-2 rounded-lg border border-gray-200 text-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="truncate flex-1">
+                      {file.status ? (
+                        <div className="flex items-center">
+                          {file.status === 'uploading' && (
+                            <span className="mr-1 w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></span>
+                          )}
+                          {file.status === 'success' && (
+                            <span className="mr-1 w-3 h-3 bg-green-500 rounded-full"></span>
+                          )}
+                          {file.status === 'error' && (
+                            <span className="mr-1 w-3 h-3 bg-red-500 rounded-full"></span>
+                          )}
+                          <span>{file.display_name || file.name}</span>
+                        </div>
+                      ) : (
+                        file.display_name || file.name
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeFile(index)}
+                      className="ml-2 text-red-400 hover:text-red-600"
+                      title="刪除文件"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => removeFile(index)}
-                    className="ml-2 text-red-400 hover:text-red-600"
-                    title="刪除文件"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                  
+                  {/* 添加上傳進度條 */}
+                  {file.status === 'uploading' && file.progress !== undefined && (
+                    <div className="mt-1">
+                      <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-blue-500 rounded-full" 
+                          style={{ width: `${file.progress}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-xs text-gray-500 text-right mt-1">
+                        {file.progress}%
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {files.length === 0 && (
