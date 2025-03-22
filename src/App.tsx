@@ -112,7 +112,6 @@ function App() {
   // const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
-  const [showUploadedFiles, setShowUploadedFiles] = useState<boolean>(false)
   const [showUploadSuccess, setShowUploadSuccess] = useState<boolean>(false)
 
   // 載入歷史對話
@@ -461,23 +460,6 @@ function App() {
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
       setError(null);
-    }
-  }
-
-  const removeFile = async (index: number) => {
-    const fileToRemove = files[index]
-    try {
-      await axios.delete(`${API_URL}/api/files/${fileToRemove.name}`)
-      setFiles(prev => prev.filter((_, i) => i !== index))
-      // 手動刷新知識庫統計
-      await loadVectorStoreStats()
-    } catch (error) {
-      console.error('Delete error:', error)
-      if (axios.isAxiosError(error)) {
-        setError(`刪除檔案失敗: ${error.response?.data?.detail || error.message}`)
-      } else {
-        setError('刪除檔案時發生未知錯誤')
-      }
     }
   }
 
@@ -869,39 +851,14 @@ function App() {
   }, [files]); // 當文件列表變化時重新加載
 
   // 新增/更新對話歷史
-  const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
-    try {
-      // 如果當前已經有對話ID，且非新對話，則跳過保存
-      if (currentChatId) {
-        console.log('已有對話ID，跳過創建新歷史:', currentChatId);
-        return null;
-      } else {
-        console.log('創建新對話歷史');
-        return await createNewChatHistory(messages, title);
-      }
-    } catch (error) {
-      console.error('保存對話歷史失敗:', error);
-      return null;
-    }
-  };
+  // const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
+  //   // 實現保存或更新聊天歷史的邏輯
+  // }
 
   // 創建新的對話歷史
-  const createNewChatHistory = async (messages: Message[], title?: string) => {
-    try {
-      console.log('開始創建新對話歷史, 訊息數量:', messages.length);
-      const historyResponse = await axios.post(`${API_URL}/api/history`, {
-        messages: messages,
-        title: title
-      });
-      console.log('對話歷史創建成功, ID:', historyResponse.data.id);
-      setCurrentChatId(historyResponse.data.id);
-      await fetchChatHistories(); // 重新獲取對話列表
-      return historyResponse.data;
-    } catch (error) {
-      console.error('創建對話歷史失敗:', error);
-      return null;
-    }
-  };
+  // const createNewChatHistory = async (messages: Message[], title?: string) => {
+  //   // 實現創建新對話歷史的邏輯
+  // }
 
   // 新對話按鈕
   const startNewChat = () => {
