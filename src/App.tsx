@@ -75,7 +75,7 @@ interface VectorStoreStats {
   is_empty: boolean
 }
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -134,17 +134,21 @@ function App() {
   const loadChatHistory = async (chatId: string) => {
     try {
       setIsLoading(true);
-      
-      // 載入選擇的對話歷史
       console.log('正在載入對話歷史, ID:', chatId);
+      
       const response = await axios.get(`${API_URL}/api/history/${chatId}`);
       console.log('載入對話歷史回應:', response.data);
       
       if (response.data && response.data.messages) {
-        // 先更新當前對話ID
+        // 確保消息格式正確
+        const formattedMessages = response.data.messages.map((msg: any) => ({
+          role: msg.role,
+          content: msg.content,
+          sources: msg.sources || []
+        }));
+        
         setCurrentChatId(chatId);
-        // 然後更新消息列表
-        setMessages(response.data.messages);
+        setMessages(formattedMessages);
         setError(null);
       } else {
         console.error('對話歷史格式不正確:', response.data);
@@ -199,15 +203,6 @@ function App() {
       content: currentInput
     }
 
-    const assistantMessage: Message = {
-      role: 'assistant',
-      content: '',
-      sources: []
-    }
-
-    const updatedMessages = [...messages, newMessage, assistantMessage]
-    setMessages(updatedMessages)
-
     try {
       // 如果沒有當前對話ID，創建一個新的
       if (!currentChatId) {
@@ -218,6 +213,90 @@ function App() {
         });
         console.log('創建新對話成功:', historyResponse.data);
         setCurrentChatId(historyResponse.data.id);
+      }
+
+      // 發送聊天請求
+      const chatResponse = await fetch(`${API_URL}/api/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: currentInput,
+          history: messages
+        })
+      });
+
+      if (!chatResponse.ok) {
+        throw new Error(`HTTP error! status: ${chatResponse.status}`);
+      }
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: '',
+        sources: []
+      };
+
+      const updatedMessages = [...messages, newMessage, assistantMessage];
+      setMessages(updatedMessages);
+
+      const reader = chatResponse.body?.getReader();
+      if (!reader) {
+        throw new Error('無法獲取響應流');
+      }
+
+      let tempResponse = '';
+      let sources: Source[] = [];
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data: ')) continue;
+          
+          const data = line.slice(5);
+          
+          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
+            try {
+              const sourcesJson = data.slice(9, -10);
+              sources = JSON.parse(sourcesJson);
+            } catch (error) {
+              console.error('解析來源信息時出錯:', error);
+            }
+            continue;
+          }
+          
+          if (data === '[DONE]') {
+            setMessages(prev => {
+              const updatedMessages = [...prev];
+              const lastMessage = updatedMessages[updatedMessages.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant') {
+                lastMessage.content = tempResponse;
+                lastMessage.sources = sources;
+              }
+              return updatedMessages;
+            });
+            break;
+          }
+          
+          if (!data.includes('[SOURCES]') && !data.includes('[ERROR]') && data !== '[DONE]') {
+            tempResponse += data;
+            setMessages(prev => {
+              const updatedMessages = [...prev];
+              const lastMessage = updatedMessages[updatedMessages.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant') {
+                lastMessage.content = tempResponse;
+              }
+              return updatedMessages;
+            });
+          }
+        }
       }
 
       // 更新現有對話
@@ -237,110 +316,17 @@ function App() {
           setError('對話更新失敗');
         }
       }
-
-      // 發送聊天請求
-      const response = await fetch(`${API_URL}/api/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: currentInput,
-          history: messages  // 使用當前的消息歷史
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('無法獲取響應流')
-      }
-
-      let tempResponse = ''
-      let sources: Source[] = []
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done, value } = await reader.read()
-        
-        if (done) break
-        
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
-        
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith('data: ')) continue
-          
-          const data = line.slice(5)
-          
-          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
-            try {
-              const sourcesJson = data.slice(9, -10)
-              sources = JSON.parse(sourcesJson)
-            } catch (error) {
-              console.error('解析來源信息時出錯:', error)
-            }
-            continue
-          }
-          
-          else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
-            const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
-            setError(`聊天請求失敗: ${errorMsg}`)
-            break
-          }
-          
-          else if (data === '[DONE]') {
-            setMessages(prev => {
-              const updatedMessages = [...prev]
-              for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                if (updatedMessages[i].role === 'assistant') {
-                  updatedMessages[i] = {
-                    ...updatedMessages[i],
-                    content: tempResponse,
-                    sources: sources
-                  }
-                  break
-                }
-              }
-              return updatedMessages
-            })
-            break
-          }
-          
-          else {
-            if (!data.includes('[SOURCES]') && !data.includes('[ERROR]') && data !== '[DONE]') {
-              tempResponse += data
-              setMessages(prev => {
-                const updatedMessages = [...prev]
-                for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                  if (updatedMessages[i].role === 'assistant') {
-                    updatedMessages[i] = {
-                      ...updatedMessages[i],
-                      content: tempResponse
-                    }
-                    break
-                  }
-                }
-                return updatedMessages
-              })
-            }
-          }
-        }
-      }
     } catch (error) {
-      console.error('Chat error:', error)
+      console.error('Chat error:', error);
       if (axios.isAxiosError(error)) {
-        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
+        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`);
       } else {
-        setError('發送訊息時發生未知錯誤')
+        setError('發送訊息時發生未知錯誤');
       }
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const deleteHistory = async (chatId: string) => {
     try {
