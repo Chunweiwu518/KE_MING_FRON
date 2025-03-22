@@ -39,37 +39,46 @@ const formatSourceContent = (content: string): string => {
   if (!content) return '';
   
   try {
-    // 檢查是否為JSON字符串並嘗試解析
-    if (content.startsWith('{') && content.endsWith('}')) {
-      try {
-        const parsed = JSON.parse(content);
-        return parsed.content || content;
-      } catch (e) {
-        // 解析失敗，繼續處理
+    // 檢查是否為 JSON 字符串並嘗試解析
+    if (typeof content === 'string' && (content.includes('content') || content.includes('\\u'))) {
+      // 處理特殊的格式如 {"content": "..."} 或帶有轉義的情況
+      let processedContent = content;
+      
+      // 嘗試直接提取 content 字段
+      const contentMatch = content.match(/"content":\s*"([^"]*)"/) || content.match(/\"content\":\s*\"(.*?)\"(?=,|\})/) || content.match(/content\":\"(.*?)\"(?=,|\})/);
+      if (contentMatch && contentMatch[1]) {
+        processedContent = contentMatch[1];
       }
+
+      // 處理 Unicode 轉義序列
+      processedContent = processedContent.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
+        String.fromCharCode(parseInt(hex, 16))
+      );
+
+      // 處理常見的轉義字符
+      processedContent = processedContent
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'")
+        .replace(/\\\\/g, '\\');
+      
+      // 移除前後的引號，如果存在
+      if ((processedContent.startsWith('"') && processedContent.endsWith('"')) || 
+          (processedContent.startsWith("'") && processedContent.endsWith("'"))) {
+        processedContent = processedContent.substring(1, processedContent.length - 1);
+      }
+      
+      return processedContent;
     }
     
-    // 嘗試解碼Unicode轉義序列
-    const decodedContent = content.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => 
-      String.fromCharCode(parseInt(hex, 16))
-    );
-    
-    // 如果內容以引號開始和結束，去除引號
-    let cleanedContent = decodedContent;
-    if ((cleanedContent.startsWith('"') && cleanedContent.endsWith('"')) || 
-        (cleanedContent.startsWith("'") && cleanedContent.endsWith("'"))) {
-      cleanedContent = cleanedContent.substring(1, cleanedContent.length - 1);
-    }
-    
-    // 移除雙反斜槓和特殊格式
-    cleanedContent = cleanedContent.replace(/\\n/g, '\n')
-                                  .replace(/\\"/g, '"')
-                                  .replace(/\\\\/g, '\\');
-    
-    return cleanedContent;
+    // 如果不是 JSON 字符串，直接返回
+    return String(content);
   } catch (error) {
-    console.error('格式化來源內容時出錯:', error);
-    return content; // 發生錯誤時返回原始內容
+    console.error('格式化來源內容時出錯:', error, content);
+    // 發生錯誤時，嘗試返回任何可能的字符串表示
+    return String(content);
   }
 }
 
@@ -1203,23 +1212,29 @@ function App() {
                       查看引用來源 ({lastMessage.sources.length})
                     </summary>
                     <div className="p-4 space-y-3">
-                      {lastMessage.sources.map((source, sourceIndex) => (
-                        <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-700 font-medium">
-                              文件：{source.metadata.source}
-                            </span>
-                            {source.metadata.page !== undefined && (
-                              <span className="text-gray-500 text-xs">
-                                第 {source.metadata.page} 頁
+                      {lastMessage.sources.map((source, sourceIndex) => {
+                        console.log('來源原始內容:', source.content); // 添加調試日誌
+                        const formattedContent = formatSourceContent(source.content);
+                        console.log('格式化後的內容:', formattedContent); // 查看格式化結果
+                        
+                        return (
+                          <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-gray-700 font-medium">
+                                文件：{source.metadata.source}
                               </span>
-                            )}
+                              {source.metadata.page !== undefined && (
+                                <span className="text-gray-500 text-xs">
+                                  第 {source.metadata.page} 頁
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-gray-700 text-sm whitespace-pre-wrap">
+                              {formattedContent}
+                            </p>
                           </div>
-                          <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                            {formatSourceContent(source.content)}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </details>
                 </div>
