@@ -136,21 +136,36 @@ function App() {
       setIsLoading(true);
       
       // 載入選擇的對話歷史
+      console.log('正在載入對話歷史, ID:', chatId);
       const response = await axios.get(`${API_URL}/api/history/${chatId}`);
-      console.log('載入對話歷史回應:', response.data);
+      console.log('載入對話歷史回應 (完整):', JSON.stringify(response.data));
       
-      if (response.data && Array.isArray(response.data.messages)) {
+      if (response.data && Array.isArray(response.data.messages) && response.data.messages.length > 0) {
+        console.log('對話消息數量:', response.data.messages.length);
+        console.log('第一條消息:', JSON.stringify(response.data.messages[0]));
+        
         // 先更新當前對話ID
         setCurrentChatId(chatId);
         // 然後更新消息列表
         setMessages(response.data.messages);
         setError(null);
       } else {
-        console.error('對話歷史格式不正確:', response.data);
-        setError('對話歷史格式不正確');
+        console.error('對話歷史格式不正確 (詳細):', response.data);
+        if (response.data && response.data.messages === undefined) {
+          console.error('缺少 messages 屬性');
+        } else if (response.data && !Array.isArray(response.data.messages)) {
+          console.error('messages 不是數組');
+        } else if (response.data && response.data.messages.length === 0) {
+          console.log('messages 數組為空，顯示空對話');
+          setCurrentChatId(chatId);
+          setMessages([]);
+          setError(null);
+        } else {
+          setError('對話歷史格式不正確，無法載入');
+        }
       }
     } catch (error) {
-      console.error('載入對話歷史失敗:', error);
+      console.error('載入對話歷史失敗 (詳細):', error);
       setError('載入對話歷史失敗');
     } finally {
       setIsLoading(false);
@@ -210,20 +225,28 @@ function App() {
     try {
       // 如果沒有當前對話ID，創建一個新的
       if (!currentChatId) {
+        console.log('沒有當前對話ID，創建新對話');
         const historyResponse = await axios.post(`${API_URL}/api/history`, {
           messages: [newMessage],
           title: currentInput.slice(0, 30) + '...'
         });
-        console.log('創建新對話:', historyResponse.data);
+        console.log('創建新對話成功:', historyResponse.data);
         setCurrentChatId(historyResponse.data.id);
       }
       
       // 更新現有對話
       if (currentChatId) {
-        await axios.post(`${API_URL}/api/history/${currentChatId}`, {
-          messages: updatedMessages,
-          title: messages[0]?.content.slice(0, 30) + '...' || '新對話'
-        });
+        console.log('更新現有對話:', currentChatId);
+        console.log('更新消息數量:', updatedMessages.length);
+        try {
+          const updateResponse = await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+            messages: updatedMessages,
+            title: messages.length > 0 ? messages[0]?.content.slice(0, 30) + '...' : '新對話'
+          });
+          console.log('對話更新成功:', updateResponse.data);
+        } catch (updateError) {
+          console.error('對話更新失敗:', updateError);
+        }
       }
 
       // 更新歷史列表
