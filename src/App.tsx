@@ -75,19 +75,6 @@ interface VectorStoreStats {
   is_empty: boolean
 }
 
-interface UsageStats {
-  monthly_tokens: {
-    used: number
-    total: number
-  }
-  daily_api_calls: {
-    count: number
-    limit: number
-  }
-  average_response_time: number
-  system_status: 'normal' | 'warning' | 'error'
-}
-
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function App() {
@@ -104,18 +91,6 @@ function App() {
     files: [],
     is_empty: true
   })
-  const [usageStats, setUsageStats] = useState<UsageStats>({
-    monthly_tokens: {
-      used: 0,
-      total: 200000
-    },
-    daily_api_calls: {
-      count: 0,
-      limit: 1000
-    },
-    average_response_time: 0,
-    system_status: 'normal'
-  })
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -128,6 +103,20 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 在適當的時機加載統計信息
+  useEffect(() => {
+    loadVectorStoreStats();
+    
+    // 每30秒更新一次知識庫統計
+    const vectorStoreInterval = setInterval(() => {
+      loadVectorStoreStats();
+    }, 30000);
+    
+    return () => {
+      clearInterval(vectorStoreInterval);
+    };
+  }, []);
 
   const fetchChatHistories = async () => {
     try {
@@ -155,6 +144,29 @@ function App() {
       setIsLoading(false)
     }
   }
+
+  // 新對話按鈕
+  const startNewChat = async () => {
+    console.log('開始新對話，重置狀態');
+    setMessages([]);
+    setCurrentChatId(null);
+    setError(null);
+
+    try {
+      // 立即創建新的對話歷史
+      const response = await axios.post(`${API_URL}/api/history`, {
+        messages: [],
+        title: '新對話'
+      });
+      
+      console.log('新對話創建成功:', response.data.id);
+      setCurrentChatId(response.data.id);
+      await fetchChatHistories(); // 重新獲取對話列表
+    } catch (error) {
+      console.error('創建新對話失敗:', error);
+      setError('創建新對話失敗');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -322,141 +334,6 @@ function App() {
     }
   }
 
-  // 添加獲取使用統計的函數
-  const loadUsageStats = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/stats/usage`);
-      setUsageStats(response.data);
-    } catch (error) {
-      console.error('獲取使用統計失敗:', error);
-    }
-  };
-
-  // 在適當的時機加載統計信息
-  useEffect(() => {
-    loadUsageStats();
-    loadVectorStoreStats();
-    
-    // 每分鐘更新一次使用統計
-    const statsInterval = setInterval(() => {
-      loadUsageStats();
-    }, 60000);
-    
-    // 每30秒更新一次知識庫統計
-    const vectorStoreInterval = setInterval(() => {
-      loadVectorStoreStats();
-    }, 30000);
-    
-    return () => {
-      clearInterval(statsInterval);
-      clearInterval(vectorStoreInterval);
-    };
-  }, []);
-
-  // 新增/更新對話歷史
-  const createNewChatHistory = async (messages: Message[], title?: string) => {
-    try {
-      console.log('開始創建新對話歷史, 訊息數量:', messages.length);
-      const historyResponse = await axios.post(`${API_URL}/api/history`, {
-        messages: messages,
-        title: title
-      });
-      console.log('對話歷史創建成功, ID:', historyResponse.data.id);
-      setCurrentChatId(historyResponse.data.id);
-      await fetchChatHistories(); // 重新獲取對話列表
-      return historyResponse.data;
-    } catch (error) {
-      console.error('創建對話歷史失敗:', error);
-      return null;
-    }
-  };
-
-  // 新對話按鈕
-  const startNewChat = async () => {
-    console.log('開始新對話，重置狀態');
-    setMessages([]);
-    setCurrentChatId(null);
-    setError(null);
-
-    try {
-      // 立即創建新的對話歷史
-      const newChat = await createNewChatHistory([], '新對話');
-      if (newChat) {
-        console.log('新對話創建成功:', newChat.id);
-        setCurrentChatId(newChat.id);
-      }
-    } catch (error) {
-      console.error('創建新對話失敗:', error);
-      setError('創建新對話失敗');
-    }
-  };
-
-  // 更新使用統計顯示部分
-  const renderUsageStats = () => (
-    <div className="p-4 border-t border-gray-200">
-      <h2 className="text-sm font-medium mb-2 text-gray-700">使用統計</h2>
-      <div className="space-y-3">
-        {/* Token 使用量 */}
-        <div className="bg-white p-3 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-sm text-gray-600">本月 Token 使用量</span>
-            <span className="text-sm font-medium text-gray-800">{usageStats.monthly_tokens.used.toLocaleString()}</span>
-          </div>
-          <div className="w-full h-2 bg-gray-100 rounded-full">
-            <div 
-              className="h-full bg-blue-500 rounded-full" 
-              style={{ 
-                width: `${(usageStats.monthly_tokens.used / usageStats.monthly_tokens.total) * 100}%` 
-              }}
-            ></div>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            剩餘額度：{(usageStats.monthly_tokens.total - usageStats.monthly_tokens.used).toLocaleString()} (
-            {Math.round((1 - usageStats.monthly_tokens.used / usageStats.monthly_tokens.total) * 100)}%)
-          </div>
-        </div>
-
-        {/* API 調用次數 */}
-        <div className="bg-white p-3 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">今日 API 調用</span>
-            <span className="text-sm font-medium text-gray-800">{usageStats.daily_api_calls.count} 次</span>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">每日限額：{usageStats.daily_api_calls.limit.toLocaleString()} 次</div>
-        </div>
-
-        {/* 對話統計 */}
-        <div className="bg-white p-3 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">累計對話數</span>
-            <span className="text-sm font-medium text-gray-800">{chatHistories.length}</span>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            本月新增：{
-              chatHistories.filter(chat => 
-                new Date(chat.createdAt).getMonth() === new Date().getMonth()
-              ).length
-            } 個對話
-          </div>
-        </div>
-
-        {/* 響應時間 */}
-        <div className="bg-white p-3 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">平均響應時間</span>
-            <span className="text-sm font-medium text-gray-800">{usageStats.average_response_time.toFixed(1)} 秒</span>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            系統狀態：{
-              usageStats.system_status === 'normal' ? '🟢 正常' :
-              usageStats.system_status === 'warning' ? '🟡 注意' : '🔴 異常'
-            }
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
       {/* 側邊欄 */}
@@ -475,16 +352,6 @@ function App() {
                 </svg>
               </button>
             </div>
-          </div>
-
-          {/* 新對話按鈕 */}
-          <div className="p-4 border-b border-gray-200">
-            <button
-              onClick={startNewChat}
-              className="w-full py-2 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              開始新對話
-            </button>
           </div>
 
           {/* 對話歷史列表 */}
@@ -522,8 +389,6 @@ function App() {
               ))}
             </div>
           </div>
-
-          {renderUsageStats()}
 
           {/* 系統資訊 */}
           <div className="p-4 border-t border-gray-200">
@@ -671,8 +536,15 @@ function App() {
 
         {/* 輸入區域 */}
         <div className="border-t border-gray-200 bg-white p-4">
-          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
-            <div className="relative">
+          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex gap-2 items-center">
+            <button
+              type="button"
+              onClick={startNewChat}
+              className="flex-shrink-0 py-3 px-4 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              開始新對話
+            </button>
+            <div className="relative flex-1">
               <input
                 type="text"
                 value={input}
