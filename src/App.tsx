@@ -102,6 +102,8 @@ function App() {
     files: [],
     is_empty: true
   })
+  const [showAddChat, setShowAddChat] = useState(false)
+  const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
 
@@ -1101,8 +1103,21 @@ function App() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
-        </button>
+            </button>
             <h1 className="ml-4 text-lg font-medium text-gray-800">RAG 知識庫問答</h1>
+            
+            {/* 全局上傳進度指示器 */}
+            {uploading && (
+              <div className="ml-auto flex items-center">
+                <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden mr-2">
+                  <div 
+                    className="h-full bg-blue-500 rounded-full transition-all duration-300" 
+                    style={{ width: `${totalUploadProgress}%` }}
+                  ></div>
+                </div>
+                <span className="text-sm text-gray-500">{totalUploadProgress}%</span>
+              </div>
+            )}
           </div>
         </div>
         
