@@ -102,8 +102,9 @@ function App() {
     files: [],
     is_empty: true
   })
-  const [showAddChat, setShowAddChat] = useState(false)
-  const [newChatName, setNewChatName] = useState("")
+  // 未使用的狀態變數 - 暫時註釋
+  // const [showAddChat, setShowAddChat] = useState(false)
+  // const [newChatName, setNewChatName] = useState("")
   const [uploading, setUploading] = useState(false)
   const [totalUploadProgress, setTotalUploadProgress] = useState(0)
 
