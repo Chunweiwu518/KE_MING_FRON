@@ -268,6 +268,30 @@ function App() {
               }
               return updatedMessages
             })
+
+            // 如果是新對話，保存對話歷史
+            if (!currentChatId) {
+              try {
+                const response = await axios.post(`${API_URL}/api/history`, {
+                  messages: messages,
+                  title: messages[0]?.content.slice(0, 50) || '新對話' // 使用第一條消息作為標題
+                });
+                setCurrentChatId(response.data.id);
+                await fetchChatHistories(); // 重新獲取對話列表
+              } catch (error) {
+                console.error('保存對話歷史失敗:', error);
+              }
+            } else {
+              // 如果是現有對話，更新對話歷史
+              try {
+                await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+                  messages: messages
+                });
+                await fetchChatHistories(); // 重新獲取對話列表
+              } catch (error) {
+                console.error('更新對話歷史失敗:', error);
+              }
+            }
             break
           }
           
