@@ -87,6 +87,26 @@ interface ChatHistory {
   createdAt: string
 }
 
+interface VectorStoreStats {
+  total_chunks: number;
+  unique_files: number;
+  files: string[];
+  is_empty: boolean;
+}
+
+interface UsageStats {
+  monthly_tokens: {
+    used: number;
+    total: number;
+  };
+  daily_api_calls: {
+    count: number;
+    limit: number;
+  };
+  average_response_time: number;
+  system_status: 'normal' | 'warning' | 'error';
+}
+
 const API_URL = import.meta.env.VITE_API_URL
 
 function App() {
@@ -104,11 +124,23 @@ function App() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
-  const [vectorStoreStats, setVectorStoreStats] = useState({
+  const [vectorStoreStats, setVectorStoreStats] = useState<VectorStoreStats>({
     total_chunks: 0,
     unique_files: 0,
     files: [],
     is_empty: true
+  })
+  const [usageStats, setUsageStats] = useState<UsageStats>({
+    monthly_tokens: {
+      used: 0,
+      total: 200000
+    },
+    daily_api_calls: {
+      count: 0,
+      limit: 1000
+    },
+    average_response_time: 0,
+    system_status: 'normal'
   })
 
   // 載入歷史對話
@@ -808,17 +840,36 @@ function App() {
     }
   }
 
+  // 添加獲取使用統計的函數
+  const loadUsageStats = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/stats/usage`);
+      setUsageStats(response.data);
+    } catch (error) {
+      console.error('獲取使用統計失敗:', error);
+    }
+  };
+
   // 在適當的時機加載統計信息
   useEffect(() => {
+    loadUsageStats();
     loadVectorStoreStats();
     
-    // 每30秒自動更新一次知識庫統計
-    const intervalId = setInterval(() => {
+    // 每分鐘更新一次使用統計
+    const statsInterval = setInterval(() => {
+      loadUsageStats();
+    }, 60000);
+    
+    // 每30秒更新一次知識庫統計
+    const vectorStoreInterval = setInterval(() => {
       loadVectorStoreStats();
     }, 30000);
     
-    return () => clearInterval(intervalId);
-  }, [files]); // 當文件列表變化時重新加載
+    return () => {
+      clearInterval(statsInterval);
+      clearInterval(vectorStoreInterval);
+    };
+  }, []);
 
   // 新增/更新對話歷史
   const createNewChatHistory = async (messages: Message[], title?: string) => {
@@ -857,6 +908,72 @@ function App() {
       setError('創建新對話失敗');
     }
   };
+
+  // 更新使用統計顯示部分
+  const renderUsageStats = () => (
+    <div className="p-4 border-t border-gray-200">
+      <h2 className="text-sm font-medium mb-2 text-gray-700">使用統計</h2>
+      <div className="space-y-3">
+        {/* Token 使用量 */}
+        <div className="bg-white p-3 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-sm text-gray-600">本月 Token 使用量</span>
+            <span className="text-sm font-medium text-gray-800">{usageStats.monthly_tokens.used.toLocaleString()}</span>
+          </div>
+          <div className="w-full h-2 bg-gray-100 rounded-full">
+            <div 
+              className="h-full bg-blue-500 rounded-full" 
+              style={{ 
+                width: `${(usageStats.monthly_tokens.used / usageStats.monthly_tokens.total) * 100}%` 
+              }}
+            ></div>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            剩餘額度：{(usageStats.monthly_tokens.total - usageStats.monthly_tokens.used).toLocaleString()} (
+            {Math.round((1 - usageStats.monthly_tokens.used / usageStats.monthly_tokens.total) * 100)}%)
+          </div>
+        </div>
+
+        {/* API 調用次數 */}
+        <div className="bg-white p-3 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-600">今日 API 調用</span>
+            <span className="text-sm font-medium text-gray-800">{usageStats.daily_api_calls.count} 次</span>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">每日限額：{usageStats.daily_api_calls.limit.toLocaleString()} 次</div>
+        </div>
+
+        {/* 對話統計 */}
+        <div className="bg-white p-3 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-600">累計對話數</span>
+            <span className="text-sm font-medium text-gray-800">{chatHistories.length}</span>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            本月新增：{
+              chatHistories.filter(chat => 
+                new Date(chat.createdAt).getMonth() === new Date().getMonth()
+              ).length
+            } 個對話
+          </div>
+        </div>
+
+        {/* 響應時間 */}
+        <div className="bg-white p-3 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-gray-600">平均響應時間</span>
+            <span className="text-sm font-medium text-gray-800">{usageStats.average_response_time.toFixed(1)} 秒</span>
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            系統狀態：{
+              usageStats.system_status === 'normal' ? '🟢 正常' :
+              usageStats.system_status === 'warning' ? '🟡 注意' : '🔴 異常'
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
@@ -934,65 +1051,16 @@ function App() {
             </div>
           </div>
 
-          {/* 文件上傳區域 */}
-          <div className="p-4 border-t border-gray-200">
-            <h2 className="text-sm font-medium mb-2 text-gray-700">上傳文件</h2>
-            <div className="flex flex-col space-y-2">
-              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <span className="mt-1 text-sm">選擇檔案</span>
-                <input type="file" className="hidden" accept=".txt,.pdf,.docx" multiple onChange={handleFileUpload} disabled={isLoading} />
-              </label>
-              
-              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-                <span className="mt-1 text-sm">選擇資料夾</span>
-                <input 
-                  type="file" 
-                  ref={folderInputRef}
-                  webkitdirectory="true" 
-                  directory="true"
-                  multiple 
-                  className="hidden" 
-                  onChange={handleFolderUpload} 
-                  disabled={isLoading} 
-                  {...{} as ExtendedInputHTMLAttributes}
-                />
-              </label>
-              
-              <div className="mt-4">
-                <button
-                  onClick={clearVectorStore}
-                  className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm"
-                >
-                  清空知識庫
-                </button>
-              </div>
-            </div>
-          </div>
+          {renderUsageStats()}
 
-          {/* 知識庫狀態顯示 */}
+          {/* 系統資訊 */}
           <div className="p-4 border-t border-gray-200">
-            <h2 className="text-sm font-medium mb-2 text-gray-700">知識庫狀態</h2>
-            <div className="text-xs text-gray-600">
-              <p>文件數量: {vectorStoreStats.unique_files}</p>
-              <p>文本塊數: {vectorStoreStats.total_chunks}</p>
-              <p>狀態: {vectorStoreStats.is_empty ? '🔴 空' : '🟢 有資料'}</p>
-              
-              {/* 添加刷新按鈕 */}
-              <button 
-                onClick={loadVectorStoreStats}
-                className="mt-2 text-xs text-blue-500 hover:text-blue-700 flex items-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                刷新知識庫狀態
-              </button>
+            <h2 className="text-sm font-medium mb-2 text-gray-700">系統資訊</h2>
+            <div className="text-xs text-gray-600 space-y-1">
+              <p>模型版本：GPT-4-1106-preview</p>
+              <p>知識庫大小：{vectorStoreStats.total_chunks} 塊</p>
+              <p>系統版本：v1.0.0</p>
+              <p>更新時間：{new Date().toLocaleDateString()}</p>
             </div>
           </div>
         </div>
