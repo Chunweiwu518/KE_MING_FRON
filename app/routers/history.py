@@ -86,6 +86,36 @@ async def create_chat_history(request: CreateHistoryRequest):
         raise HTTPException(status_code=500, detail=f"創建對話記錄失敗: {str(e)}")
 
 
+@router.put("/history/{chat_id}", response_model=ChatHistory)
+async def update_chat_history(chat_id: str, request: CreateHistoryRequest):
+    """更新現有對話"""
+    try:
+        if chat_id not in chat_histories:
+            raise HTTPException(status_code=404, detail="找不到指定的對話記錄")
+
+        # 更新標題和消息
+        title = request.title
+        if not title and request.messages:
+            first_message = request.messages[0].content.strip()
+            if len(first_message) > 30:
+                title = first_message[:30] + "..."
+            else:
+                title = first_message
+        elif not title:
+            title = chat_histories[chat_id].title
+
+        chat_histories[chat_id].title = title
+        chat_histories[chat_id].messages = request.messages
+        
+        print(f"對話記錄更新成功: {chat_id}")
+        return chat_histories[chat_id]
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"更新對話記錄失敗: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新對話記錄失敗: {str(e)}")
+
+
 @router.delete("/history/{chat_id}")
 async def delete_chat_history(chat_id: str):
     """刪除特定對話"""

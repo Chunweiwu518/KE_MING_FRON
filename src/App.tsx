@@ -155,9 +155,9 @@ function App() {
     console.log('開始新對話，重置狀態');
     
     try {
-      // 如果當前有對話，先保存到歷史記錄
+      // 如果當前有對話且有消息，則更新該對話的內容
       if (currentChatId && messages.length > 0) {
-        await axios.post(`${API_URL}/api/history`, {
+        await axios.put(`${API_URL}/api/history/${currentChatId}`, {
           messages: messages,
           title: messages[0].content.slice(0, 30) + '...'
         });
@@ -173,7 +173,13 @@ function App() {
       setCurrentChatId(response.data.id);
       setMessages([]);
       setError(null);
-      await fetchChatHistories(); // 重新獲取對話列表
+      
+      // 只在創建新對話成功後更新歷史列表
+      const historyResponse = await axios.get(`${API_URL}/api/history`);
+      const sortedHistories = historyResponse.data.sort((a: ChatHistory, b: ChatHistory) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setChatHistories(sortedHistories);
     } catch (error) {
       console.error('創建新對話失敗:', error);
       setError('創建新對話失敗');
@@ -207,10 +213,17 @@ function App() {
       // 如果沒有當前對話ID，創建一個新的
       if (!currentChatId) {
         const historyResponse = await axios.post(`${API_URL}/api/history`, {
-          messages: updatedMessages,
+          messages: [newMessage],
           title: currentInput.slice(0, 30) + '...'
         });
         setCurrentChatId(historyResponse.data.id);
+        await fetchChatHistories();
+      } else {
+        // 更新現有對話
+        await axios.put(`${API_URL}/api/history/${currentChatId}`, {
+          messages: updatedMessages,
+          title: messages[0]?.content.slice(0, 30) + '...' || '新對話'
+        });
       }
 
       const response = await fetch(`${API_URL}/api/chat/stream`, {
