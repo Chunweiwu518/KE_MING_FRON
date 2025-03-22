@@ -263,7 +263,7 @@ function App() {
                 if (updatedMessages[i].role === 'assistant') {
                   updatedMessages[i] = {
                     ...updatedMessages[i],
-                    content: tempResponse,
+                    content: decodeURIComponent(tempResponse.replace(/\\u/g, '%u')),
                     sources: sources
                   }
                   break
@@ -278,22 +278,29 @@ function App() {
           else {
             // 如果不是特殊標記，則添加到臨時響應中
             if (!data.includes('[SOURCES]') && !data.includes('[ERROR]') && data !== '[DONE]') {
-              tempResponse += data
-              // 更新助手消息的內容
-              setMessages(prev => {
-                const updatedMessages = [...prev]
-                // 尋找並更新最新的助手消息
-                for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                  if (updatedMessages[i].role === 'assistant') {
-                    updatedMessages[i] = {
-                      ...updatedMessages[i],
-                      content: tempResponse
+              try {
+                // 嘗試解碼可能的 Unicode 轉義序列
+                const decodedData = decodeURIComponent(data.replace(/\\u/g, '%u'))
+                tempResponse += decodedData
+                // 更新助手消息的內容
+                setMessages(prev => {
+                  const updatedMessages = [...prev]
+                  // 尋找並更新最新的助手消息
+                  for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                    if (updatedMessages[i].role === 'assistant') {
+                      updatedMessages[i] = {
+                        ...updatedMessages[i],
+                        content: tempResponse
+                      }
+                      break
                     }
-                    break
                   }
-                }
-                return updatedMessages
-              })
+                  return updatedMessages
+                })
+              } catch (error) {
+                console.error('解碼回應時出錯:', error)
+                tempResponse += data
+              }
             }
           }
         }
