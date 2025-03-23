@@ -65,8 +65,6 @@ interface Source {
   metadata: {
     source: string
     page?: number
-    filename?: string
-    page_range?: string
   }
 }
 
@@ -95,15 +93,13 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
   const [vectorStoreStats, setVectorStoreStats] = useState({
     total_chunks: 0,
     unique_files: 0,
     files: [],
     is_empty: true
   })
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const folderInputRef = useRef<HTMLInputElement>(null);
 
   // 載入歷史對話
   useEffect(() => {
@@ -156,104 +152,242 @@ function App() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    e.preventDefault()
+    if (!input.trim()) return
 
-    const userMessage = { role: 'user', content: input } as Message;
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-    setError(null);
+    // 保存當前的輸入內容，因為之後會清空輸入框
+    const currentInput = input.trim()
+    
+    // 防止提交時重複處理
+    setInput('')
+    setIsLoading(true)
+    setError(null)
+
+    // 創建用戶消息
+    const newMessage: Message = {
+      role: 'user',
+      content: currentInput
+    }
+
+    // 創建一個初始的助手消息
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: '',
+      sources: []
+    }
+
+    // 檢查是否需要創建新對話
+    const isNewChat = !currentChatId
+
+    // 將用戶消息和初始的空助手消息加入到聊天記錄
+    setMessages(prev => [...prev, newMessage, assistantMessage])
 
     try {
-      const eventSource = new EventSource(`${API_URL}/api/chat/stream?query=${encodeURIComponent(input)}`);
-      let tempResponse = '';
-      let sources: Source[] = [];
+      // 使用 fetch API 發起 POST 請求
+      const response = await fetch(`${API_URL}/api/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: currentInput,
+          history: messages
+        })
+      })
 
-      eventSource.onmessage = (event) => {
-        const { data } = event;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      // 表示我們處理過這個對話的請求，避免重複保存
+      let conversationProcessed = false;
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('無法獲取響應流')
+      }
+
+      // 創建一個暫存的助手回應和來源
+      let tempResponse = ''
+      let sources: Source[] = []
+      
+      // 創建文本解碼器
+      const decoder = new TextDecoder()
+
+      // 處理流式數據
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
         
-        // 處理結束信號
-        if (data === '[DONE]') {
-          eventSource.close();
-          setIsLoading(false);
-          
-          // 如果我們已經保存了對話歷史，更新最新消息
-          if (messages.length > 0 && userMessage) {
-            saveOrUpdateChatHistory([...messages, userMessage, { 
-              role: 'assistant', 
-              content: tempResponse,
-              sources: sources
-            }]);
-          }
-          
-          return;
-        }
+        // 將二進制數據解碼為文本
+        const text = decoder.decode(value, { stream: true })
         
-        // 處理錯誤信號
-        if (data.startsWith('[ERROR]')) {
-          const errorMessage = data.replace('[ERROR]', '').replace('[/ERROR]', '');
-          setError(errorMessage);
-          eventSource.close();
-          setIsLoading(false);
-          return;
-        }
-        
-        // 處理來源信息
-        if (data.includes('[SOURCES]')) {
-          // 使用我們的解析函數處理來源信息
-          sources = parseSourcesFromResponse(data);
+        // 處理SSE格式的數據行
+        const lines = text.split('\n\n')
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
           
-          // 更新最後一條消息，設置來源
-          setMessages(prev => {
-            const updated = [...prev];
-            if (updated.length > 0) {
-              const lastMsg = {...updated[updated.length - 1]};
-              updated[updated.length - 1] = {
-                ...lastMsg,
-                sources: sources
-              };
+          const data = line.substring(6) // 去掉 "data: " 前綴
+          
+          // 檢測特殊標記
+          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
+            // 解析來源數據
+            const sourcesData = data.replace('[SOURCES]', '').replace('[/SOURCES]', '')
+            try {
+              sources = JSON.parse(sourcesData)
+            } catch (e) {
+              console.error('解析來源數據失敗:', e)
             }
-            return updated;
-          });
-          
-          return;
-        }
-        
-        // 正常的消息內容處理
-        tempResponse += data;
-        setMessages(prev => {
-          const updated = [...prev];
-          if (updated.length > 1) {
-            updated[updated.length - 1] = {
-              role: 'assistant',
-              content: tempResponse,
-              sources: sources.length > 0 ? sources : undefined
-            };
-          } else {
-            updated.push({
-              role: 'assistant',
-              content: tempResponse,
-              sources: sources.length > 0 ? sources : undefined
-            });
+          } 
+          // 檢測錯誤信息
+          else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
+            const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
+            setError(`聊天請求失敗: ${errorMsg}`)
+            break
           }
-          return updated;
-        });
-      };
+          // 檢測結束標記
+          else if (data === '[DONE]') {
+            // 更新最終的助手消息，包括來源
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse,
+                    sources: sources
+                  }
+                  break
+                }
+              }
+              
+              // 只有在這是新對話且尚未處理過時，才保存歷史
+              if (isNewChat && !conversationProcessed && updatedMessages.length >= 2) {
+                // 標記為已處理
+                conversationProcessed = true;
+                console.log('流處理完成，準備保存對話歷史');
+                
+                // 使用setTimeout確保當前狀態更新完畢後再保存歷史
+                setTimeout(() => {
+                  // 再次檢查沒有currentChatId才創建新對話
+                  if (!currentChatId) {
+                    saveOrUpdateChatHistory(
+                      updatedMessages, 
+                      currentInput.slice(0, 20) + "..."
+                    );
+                  }
+                }, 100);
+              }
+              
+              return updatedMessages
+            })
+            break
+          } 
+          // 一般情況：處理正常的字符
+          else {
+            tempResponse += data
+            // 更新助手消息的內容
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse
+                  }
+                  break
+                }
+              }
+              return updatedMessages
+            })
 
-      eventSource.onerror = (error) => {
-        console.error('SSE Error:', error);
-        eventSource.close();
-        setIsLoading(false);
-        setError('連接中斷，請重試。');
+            // 增加一個小延遲再滾動，確保DOM已更新
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }, 10);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error)
+      if (axios.isAxiosError(error)) {
+        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
+      } else {
+        setError('發送訊息時發生未知錯誤')
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = e.target.files
+    if (!uploadedFiles) return
+
+    setIsLoading(true)
+    setError('正在處理文件...')
+    let uploadSuccess = false;
+
+    for(let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i]
+      const uploadFormData = new FormData()
+      uploadFormData.append('file', file)
+      
+      // 添加一個臨時文件項，狀態為上傳中
+      const tempFileId = Date.now() + '_' + i; // 創建一個臨時ID
+      const tempFile: FileInfo = { 
+        name: tempFileId,
+        display_name: file.name,
+        size: file.size,
+        status: 'uploading'
       };
       
-    } catch (error) {
-      console.error('提交查詢時出錯:', error);
-      setIsLoading(false);
-      setError('發送請求時出錯，請重試。');
+      setFiles(prev => [...prev, tempFile]);
+      
+      try {
+        // 直接調用 API 不保留 response 變數
+        await axios.post(`${API_URL}/api/upload`, uploadFormData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        
+        // 上傳成功，移除臨時文件
+        setFiles(prev => prev.filter(f => f.name !== tempFileId));
+        uploadSuccess = true;
+      } catch (error) {
+        console.error('文件上傳失敗:', error);
+        
+        // 更新文件狀態為錯誤
+        setFiles(prev => prev.map(f => {
+          if (f.name === tempFileId) {
+            return {
+              ...f,
+              status: 'error',
+              errorMessage: '上傳失敗'
+            };
+          }
+          return f;
+        }));
+        
+        setError(`文件 ${file.name} 上傳失敗`);
+      }
     }
-  };
+    
+    // 如果至少有一個文件上傳成功，則重新獲取文件列表
+    if (uploadSuccess) {
+      await fetchUploadedFiles();
+    }
+    
+    setIsLoading(false);
+    
+    // 如果沒有錯誤提示，清除錯誤狀態
+    if (!files.some(f => f.status === 'error')) {
+      setError(null);
+    }
+  }
 
   const removeFile = async (index: number) => {
     const fileToRemove = files[index]
@@ -541,28 +675,6 @@ function App() {
     setError(null);
   };
 
-  // 添加來源解析的健壯性
-  const parseSourcesFromResponse = (text: string) => {
-    try {
-      // 尋找[SOURCES]...[/SOURCES]格式的來源信息
-      const sourceMatch = text.match(/\[SOURCES\](.*?)\[\/SOURCES\]/s);
-      if (sourceMatch && sourceMatch[1]) {
-        // 嘗試解析JSON，如果失敗則返回空數組
-        try {
-          const sources = JSON.parse(sourceMatch[1]);
-          return Array.isArray(sources) ? sources : [];
-        } catch (e) {
-          console.error("解析來源JSON失敗:", e);
-          return [];
-        }
-      }
-      return [];
-    } catch (error) {
-      console.error("解析來源時出錯:", error);
-      return [];
-    }
-  };
-
   return (
     <div className="flex h-screen bg-white">
       {/* 側邊欄 */}
@@ -592,6 +704,14 @@ function App() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
                 <span className="mt-1 text-sm">選擇檔案</span>
+                <input type="file" className="hidden" accept=".txt,.pdf,.docx" multiple onChange={handleFileUpload} disabled={isLoading} />
+              </label>
+              
+              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <span className="mt-1 text-sm">選擇資料夾</span>
                 <input 
                   type="file" 
                   ref={folderInputRef}
@@ -821,73 +941,57 @@ function App() {
               </div>
             ))}
 
-            {/* 消息來源 - 強化版，確保始終能顯示 */}
+            {/* 消息來源 */}
             {(() => {
-              // 檢查消息數組
+              // 先檢查有沒有消息
               if (messages.length === 0) return null;
               
               // 獲取最後一條消息
               const lastMessage = messages[messages.length - 1];
               
-              // 確保消息來源始終可見
-              if (lastMessage.role !== 'assistant') return null;
+              // 檢查是否是助手的消息，並且有來源
+              if (
+                lastMessage.role !== 'assistant' || 
+                !lastMessage.sources || 
+                !Array.isArray(lastMessage.sources) || 
+                lastMessage.sources.length === 0
+              ) {
+                return null;
+              }
               
-              // 處理來源數據，確保即使格式不正確也能顯示
-              const sources = lastMessage.sources && Array.isArray(lastMessage.sources) 
-                ? lastMessage.sources
-                : [];
-              
-              // 即使沒有來源數據，也顯示一個空的來源區域框架
+              // 如果所有條件都滿足，顯示來源
               return (
                 <div className="max-w-3xl mx-auto mt-2">
-                  <details className="bg-gray-50 rounded-lg border border-gray-200" open={sources.length > 0}>
+                  <details className="bg-gray-50 rounded-lg border border-gray-200">
                     <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                          <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                        <span>引用來源</span>
-                        <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
-                          {sources.length || 0}
-                        </span>
-                      </div>
-                      <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <span>查看引用來源 ({lastMessage.sources.length})</span>
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
                       </svg>
                     </summary>
                     <div className="divide-y divide-gray-200">
-                      {sources.length > 0 ? (
-                        // 顯示所有可用的來源
-                        sources.map((source, sourceIndex) => (
-                          <div key={sourceIndex} className="p-4 hover:bg-gray-50 transition-colors">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center space-x-2">
-                                <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span className="font-medium text-gray-900">
-                                  {source.metadata?.source 
-                                    ? source.metadata.source.split('/').pop() 
-                                    : (source.metadata?.filename || '未知文件')}
-                                </span>
-                              </div>
-                              {(source.metadata?.page !== undefined || source.metadata?.page_range) && (
-                                <span className="text-sm bg-purple-50 text-purple-600 px-2.5 py-0.5 rounded-full">
-                                  {source.metadata.page_range || `第 ${source.metadata.page} 頁`}
-                                </span>
-                              )}
+                      {lastMessage.sources.map((source, sourceIndex) => (
+                        <div key={sourceIndex} className="p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center space-x-2">
+                              <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              <span className="font-medium text-gray-900">
+                                {source.metadata?.source ? source.metadata.source.split('/').pop() : '未知文件'}
+                              </span>
                             </div>
-                            <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
-                              <p className="whitespace-pre-wrap leading-relaxed">{source.content}</p>
-                            </div>
+                            {source.metadata?.page !== undefined && (
+                              <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                第 {source.metadata.page} 頁
+                              </span>
+                            )}
                           </div>
-                        ))
-                      ) : (
-                        // 如果沒有來源信息，顯示提示
-                        <div className="p-4 text-center text-gray-500">
-                          <p>沒有找到相關來源資訊</p>
+                          <div className="text-sm text-gray-700 bg-white p-3 rounded-lg border border-gray-100">
+                            <p className="whitespace-pre-wrap">{source.content}</p>
+                          </div>
                         </div>
-                      )}
+                      ))}
                     </div>
                   </details>
                 </div>
