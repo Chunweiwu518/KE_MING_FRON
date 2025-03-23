@@ -65,6 +65,7 @@ interface Source {
   metadata: {
     source: string
     page?: number
+    chunk_number?: number
   }
 }
 
@@ -79,6 +80,10 @@ interface ChatHistory {
   title: string
   messages: Message[]
   createdAt: string
+}
+
+interface GroupedSources {
+  [filename: string]: Source[];
 }
 
 const API_URL = import.meta.env.VITE_API_URL
@@ -959,30 +964,51 @@ function App() {
                 return null;
               }
               
+              // 按文件名分組來源
+              const groupedSources = lastMessage.sources.reduce<GroupedSources>((acc, source) => {
+                const filename = source.metadata?.source || '未知文件';
+                if (!acc[filename]) {
+                  acc[filename] = [];
+                }
+                acc[filename].push(source);
+                return acc;
+              }, {});
+              
               // 如果所有條件都滿足，顯示來源
               return (
                 <div className="max-w-3xl mx-auto mt-2">
                   <details className="bg-gray-50 rounded-lg border border-gray-200">
                     <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100">
-                      查看引用來源 ({lastMessage.sources.length})
+                      查看引用來源 ({lastMessage.sources.length} 個片段)
                     </summary>
-                    <div className="p-4 space-y-3">
-                      {lastMessage.sources.map((source, sourceIndex) => (
-                        <div key={sourceIndex} className="bg-white p-3 rounded-lg border border-gray-200 text-sm">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-gray-700 font-medium">
-                              文件：{source.metadata.source}
-                            </span>
-                            {source.metadata.page !== undefined && (
-                              <span className="text-gray-500 text-xs">
-                                第 {source.metadata.page} 頁
-                              </span>
-                            )}
+                    <div className="p-4 space-y-4">
+                      {Object.entries(groupedSources).map(([filename, sources]: [string, Source[]], fileIndex) => (
+                        <details key={fileIndex} className="bg-white rounded border border-gray-200">
+                          <summary className="px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50">
+                            {filename.split('/').pop()} ({sources.length} 個相關片段)
+                          </summary>
+                          <div className="p-4 space-y-3">
+                            {sources.map((source: Source, sourceIndex: number) => (
+                              <div key={sourceIndex} className="bg-gray-50 p-3 rounded-lg text-sm">
+                                <div className="flex justify-between items-center mb-2">
+                                  {source.metadata?.page !== undefined && (
+                                    <span className="text-gray-500 text-xs">
+                                      第 {source.metadata.page} 頁
+                                    </span>
+                                  )}
+                                  {source.metadata?.chunk_number !== undefined && (
+                                    <span className="text-gray-500 text-xs">
+                                      片段 #{source.metadata.chunk_number}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-gray-700 whitespace-pre-wrap">
+                                  {source.content}
+                                </p>
+                              </div>
+                            ))}
                           </div>
-                          <p className="text-gray-700 text-sm whitespace-pre-wrap">
-                            {source.content}
-                          </p>
-                        </div>
+                        </details>
                       ))}
                     </div>
                   </details>
