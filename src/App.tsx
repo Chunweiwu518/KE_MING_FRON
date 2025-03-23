@@ -67,9 +67,12 @@ interface Source {
     page?: number
     score?: number
     product_id?: string
-    [key: string]: any  // 允許其他可能的元數據
+    chunk_info?: string  // 添加 chunk 信息
+    extraction_method?: string  // 添加提取方法
+    page_range?: string  // 添加頁面範圍
+    [key: string]: any
   }
-  score?: number  // 允許分數直接在根級別
+  score?: number
   page_info?: string
 }
 
@@ -919,101 +922,93 @@ function App() {
           {/* 消息列表 */}
           <div className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.map((message, index) => (
-              <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex max-w-md ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className={`flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${
-                    message.role === 'user' ? 'bg-purple-600' : 'bg-gray-600'
-                  }`}>
-                    {message.role === 'user' ? '我' : 'AI'}
+              <div key={index} className={`p-4 ${getMessageStyle(message.content, message.role)}`}>
+                <div 
+                  className="formatted-message max-w-3xl mx-auto"
+                  dangerouslySetInnerHTML={{ __html: formatText(message.content) }}
+                />
+                
+                {/* 來源信息顯示 */}
+                {message.sources && message.sources.length > 0 && (
+                  <div className="max-w-3xl mx-auto mt-2">
+                    <details className="bg-gray-50 rounded-lg border border-gray-200">
+                      <summary className="px-4 py-2 cursor-pointer hover:bg-gray-100">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                              <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                            </svg>
+                            <span className="text-sm font-medium">引用來源</span>
+                            <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
+                              {message.sources.length}
+                            </span>
+                          </div>
+                        </div>
+                      </summary>
+                      
+                      <div className="divide-y divide-gray-200">
+                        {message.sources.map((source, sourceIndex) => {
+                          const metadata = source.metadata || {};
+                          const sourceContent = source.content || '';
+                          const fileName = metadata.source?.split('/').pop() || '未知文件';
+                          const pageInfo = metadata.page_range || metadata.page || source.page_info;
+                          const chunkInfo = metadata.chunk_info || '';
+                          const extractionMethod = metadata.extraction_method || '';
+                          const score = metadata.score || source.score;
+
+                          return (
+                            <div key={sourceIndex} className="p-4 hover:bg-gray-50">
+                              <div className="flex flex-col space-y-2">
+                                {/* 文件信息行 */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    <span className="font-medium text-gray-900">{fileName}</span>
+                                  </div>
+                                  
+                                  {/* 標籤組 */}
+                                  <div className="flex items-center space-x-2">
+                                    {score !== undefined && (
+                                      <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full">
+                                        相關度: {(score * 100).toFixed(0)}%
+                                      </span>
+                                    )}
+                                    {pageInfo && (
+                                      <span className="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded-full">
+                                        {typeof pageInfo === 'number' ? `第 ${pageInfo} 頁` : pageInfo}
+                                      </span>
+                                    )}
+                                    {extractionMethod && (
+                                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
+                                        {extractionMethod}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {/* Chunk 信息 */}
+                                {chunkInfo && (
+                                  <div className="text-xs text-gray-500">
+                                    {chunkInfo}
+                                  </div>
+                                )}
+                                
+                                {/* 內容 */}
+                                <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
+                                  <p className="whitespace-pre-wrap leading-relaxed">{sourceContent}</p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
                   </div>
-                  <div className={`mx-2 px-4 py-2 rounded-lg ${
-                    message.role === 'user' 
-                      ? 'bg-purple-600 text-white' 
-                      : getMessageStyle(message.content, message.role)
-                  }`}>
-                    {message.role === 'assistant' ? (
-                      <div 
-                        className="text-sm formatted-message"
-                        dangerouslySetInnerHTML={{ 
-                          __html: formatText(message.content) 
-                        }}
-                      />
-                    ) : (
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             ))}
-
-            {/* 消息來源 */}
-            {(() => {
-              // 檢查最後一條消息
-              const lastMessage = messages[messages.length - 1];
-              if (!lastMessage || lastMessage.role !== 'assistant') return null;
-
-              // 確保 sources 存在且為數組
-              const sources = Array.isArray(lastMessage.sources) ? lastMessage.sources : [];
-              if (sources.length === 0) return null;
-
-              return (
-                <div className="max-w-3xl mx-auto mt-2">
-                  <details className="bg-gray-50 rounded-lg border border-gray-200">
-                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                          <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                        <span>引用來源</span>
-                        <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
-                          {sources.length}
-                        </span>
-                      </div>
-                    </summary>
-                    <div className="divide-y divide-gray-200">
-                      {sources.map((source, index) => {
-                        // 安全地獲取來源資訊
-                        const sourceContent = source.content || '無內容';
-                        const sourcePath = source.metadata?.source || '未知來源';
-                        const fileName = sourcePath.split('/').pop() || '未知文件';
-                        const pageNumber = source.metadata?.page || source.page_info?.match(/第(\d+)頁/)?.[1];
-                        const score = source.metadata?.score || source.score;
-
-                        return (
-                          <div key={index} className="p-4 hover:bg-gray-50 transition-colors">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center space-x-2">
-                                <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span className="font-medium text-gray-900">
-                                  {fileName}
-                                </span>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                {score !== undefined && (
-                                  <span className="text-xs text-gray-500">
-                                    相關度: {(score * 100).toFixed(0)}%
-                                  </span>
-                                )}
-                                {pageNumber && (
-                                  <span className="text-sm bg-purple-50 text-purple-600 px-2.5 py-0.5 rounded-full">
-                                    第 {pageNumber} 頁
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
-                              <p className="whitespace-pre-wrap leading-relaxed">{sourceContent}</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </details>
-                </div>
-              );
-            })()}
 
             {/* 顯示加載動畫 */}
             {isLoading && (
