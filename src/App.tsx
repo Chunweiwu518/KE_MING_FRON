@@ -95,13 +95,16 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const folderInputRef = useRef<HTMLInputElement>(null)
   const [vectorStoreStats, setVectorStoreStats] = useState({
     total_chunks: 0,
     unique_files: 0,
     files: [],
     is_empty: true
   })
+
+  // 添加文件夾輸入 ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   // 載入歷史對話
   useEffect(() => {
@@ -154,175 +157,104 @@ function App() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim()) return
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
 
-    // 保存當前的輸入內容，因為之後會清空輸入框
-    const currentInput = input.trim()
-    
-    // 防止提交時重複處理
-    setInput('')
-    setIsLoading(true)
-    setError(null)
-
-    // 創建用戶消息
-    const newMessage: Message = {
-      role: 'user',
-      content: currentInput
-    }
-
-    // 創建一個初始的助手消息
-    const assistantMessage: Message = {
-      role: 'assistant',
-      content: '',
-      sources: []
-    }
-
-    // 檢查是否需要創建新對話
-    const isNewChat = !currentChatId
-
-    // 將用戶消息和初始的空助手消息加入到聊天記錄
-    setMessages(prev => [...prev, newMessage, assistantMessage])
+    const userMessage = { role: 'user', content: input } as Message;
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+    setError(null);
 
     try {
-      // 使用 fetch API 發起 POST 請求
-      const response = await fetch(`${API_URL}/api/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: currentInput,
-          history: messages
-        })
-      })
+      const eventSource = new EventSource(`${API_URL}/api/chat/stream?query=${encodeURIComponent(input)}`);
+      let tempResponse = '';
+      let sources: Source[] = [];
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      // 表示我們處理過這個對話的請求，避免重複保存
-      let conversationProcessed = false;
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('無法獲取響應流')
-      }
-
-      // 創建一個暫存的助手回應和來源
-      let tempResponse = ''
-      let sources: Source[] = []
-      
-      // 創建文本解碼器
-      const decoder = new TextDecoder()
-
-      // 處理流式數據
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      eventSource.onmessage = (event) => {
+        const { data } = event;
         
-        // 將二進制數據解碼為文本
-        const text = decoder.decode(value, { stream: true })
-        
-        // 處理SSE格式的數據行
-        const lines = text.split('\n\n')
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+        // 處理結束信號
+        if (data === '[DONE]') {
+          eventSource.close();
+          setIsLoading(false);
           
-          const data = line.substring(6) // 去掉 "data: " 前綴
+          // 如果我們已經保存了對話歷史，更新最新消息
+          if (messages.length > 0 && userMessage) {
+            saveOrUpdateChatHistory([...messages, userMessage, { 
+              role: 'assistant', 
+              content: tempResponse,
+              sources: sources
+            }]);
+          }
           
-          // 檢測特殊標記
-          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
-            // 解析來源數據
-            const sourcesData = data.replace('[SOURCES]', '').replace('[/SOURCES]', '')
-            try {
-              sources = JSON.parse(sourcesData)
-            } catch (e) {
-              console.error('解析來源數據失敗:', e)
-            }
-          } 
-          // 檢測錯誤信息
-          else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
-            const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
-            setError(`聊天請求失敗: ${errorMsg}`)
-            break
-          }
-          // 檢測結束標記
-          else if (data === '[DONE]') {
-            // 更新最終的助手消息，包括來源
-            setMessages(prev => {
-              const updatedMessages = [...prev]
-              // 尋找並更新最新的助手消息
-              for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                if (updatedMessages[i].role === 'assistant') {
-                  updatedMessages[i] = {
-                    ...updatedMessages[i],
-                    content: tempResponse,
-                    sources: sources
-                  }
-                  break
-                }
-              }
-              
-              // 只有在這是新對話且尚未處理過時，才保存歷史
-              if (isNewChat && !conversationProcessed && updatedMessages.length >= 2) {
-                // 標記為已處理
-                conversationProcessed = true;
-                console.log('流處理完成，準備保存對話歷史');
-                
-                // 使用setTimeout確保當前狀態更新完畢後再保存歷史
-                setTimeout(() => {
-                  // 再次檢查沒有currentChatId才創建新對話
-                  if (!currentChatId) {
-                    saveOrUpdateChatHistory(
-                      updatedMessages, 
-                      currentInput.slice(0, 20) + "..."
-                    );
-                  }
-                }, 100);
-              }
-              
-              return updatedMessages
-            })
-            break
-          } 
-          // 一般情況：處理正常的字符
-          else {
-            tempResponse += data
-            // 更新助手消息的內容
-            setMessages(prev => {
-              const updatedMessages = [...prev]
-              // 尋找並更新最新的助手消息
-              for (let i = updatedMessages.length - 1; i >= 0; i--) {
-                if (updatedMessages[i].role === 'assistant') {
-                  updatedMessages[i] = {
-                    ...updatedMessages[i],
-                    content: tempResponse
-                  }
-                  break
-                }
-              }
-              return updatedMessages
-            })
-
-            // 增加一個小延遲再滾動，確保DOM已更新
-            setTimeout(() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-            }, 10);
-          }
+          return;
         }
-      }
+        
+        // 處理錯誤信號
+        if (data.startsWith('[ERROR]')) {
+          const errorMessage = data.replace('[ERROR]', '').replace('[/ERROR]', '');
+          setError(errorMessage);
+          eventSource.close();
+          setIsLoading(false);
+          return;
+        }
+        
+        // 處理來源信息
+        if (data.includes('[SOURCES]')) {
+          // 使用我們的解析函數處理來源信息
+          sources = parseSourcesFromResponse(data);
+          
+          // 更新最後一條消息，設置來源
+          setMessages(prev => {
+            const updated = [...prev];
+            if (updated.length > 0) {
+              const lastMsg = {...updated[updated.length - 1]};
+              updated[updated.length - 1] = {
+                ...lastMsg,
+                sources: sources
+              };
+            }
+            return updated;
+          });
+          
+          return;
+        }
+        
+        // 正常的消息內容處理
+        tempResponse += data;
+        setMessages(prev => {
+          const updated = [...prev];
+          if (updated.length > 1) {
+            updated[updated.length - 1] = {
+              role: 'assistant',
+              content: tempResponse,
+              sources: sources.length > 0 ? sources : undefined
+            };
+          } else {
+            updated.push({
+              role: 'assistant',
+              content: tempResponse,
+              sources: sources.length > 0 ? sources : undefined
+            });
+          }
+          return updated;
+        });
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('SSE Error:', error);
+        eventSource.close();
+        setIsLoading(false);
+        setError('連接中斷，請重試。');
+      };
+      
     } catch (error) {
-      console.error('Chat error:', error)
-      if (axios.isAxiosError(error)) {
-        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
-      } else {
-        setError('發送訊息時發生未知錯誤')
-      }
-    } finally {
-      setIsLoading(false)
+      console.error('提交查詢時出錯:', error);
+      setIsLoading(false);
+      setError('發送請求時出錯，請重試。');
     }
-  }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = e.target.files
