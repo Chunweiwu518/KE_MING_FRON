@@ -9,24 +9,7 @@ interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInpu
 
 // 文本格式化函數
 const formatText = (text: string): string => {
-  // 檢查是否包含 [SOURCES] 標記
-  if (text.includes('[SOURCES]')) {
-    // 提取並解析來源數據
-    const sourcesMatch = text.match(/\[SOURCES\](.*?)\[\/SOURCES\]/s);
-    if (sourcesMatch) {
-      try {
-        const sourcesData = JSON.parse(sourcesMatch[1]);
-        // 格式化來源數據
-        return sourcesData.map((source: Source) => {
-          return `來源：${source.metadata.source}\n${source.content}`;
-        }).join('\n\n');
-      } catch (e) {
-        console.error('解析來源數據失敗:', e);
-      }
-    }
-  }
-
-  // 一般文本的格式化
+  // 替換產品規格的格式
   let formattedText = text
     // 保留換行符
     .replace(/\n/g, '<br/>')
@@ -39,8 +22,7 @@ const formatText = (text: string): string => {
     // 確保適當的列表包裹
     .replace(/<li>/g, '<li class="mb-2 list-disc ml-4">')
     // 讓產品標題更明顯
-    .replace(/(EDS-[A-Za-z0-9]+的產品資料如下：)/g, '<div class="text-lg font-medium my-2">$1</div>')
-    .replace(/(HK-[A-Za-z0-9]+的產品資料如下：)/g, '<div class="text-lg font-medium my-2">$1</div>')
+    .replace(/(HK-\d+的產品資料如下：)/g, '<div class="text-lg font-medium my-2">$1</div>')
 
   // 檢查是否有列表項，如果有則添加ul標籤
   if (formattedText.includes('<li>')) {
@@ -80,10 +62,15 @@ interface FileInfo {
 
 interface Source {
   content: string
-  metadata: {
-    source: string
+  metadata?: {
+    source?: string
     page?: number
+    score?: number
+    product_id?: string
+    [key: string]: any  // 允許其他可能的元數據
   }
+  score?: number  // 允許分數直接在根級別
+  page_info?: string
 }
 
 interface Message {
@@ -961,62 +948,63 @@ function App() {
 
             {/* 消息來源 */}
             {(() => {
-              // 先檢查有沒有消息
-              if (messages.length === 0) return null;
-              
-              // 獲取最後一條消息
+              // 檢查最後一條消息
               const lastMessage = messages[messages.length - 1];
-              
-              // 檢查是否是助手的消息，並且有來源
-              if (
-                lastMessage.role !== 'assistant' || 
-                !lastMessage.sources || 
-                !Array.isArray(lastMessage.sources) || 
-                lastMessage.sources.length === 0
-              ) {
-                return null;
-              }
-              
-              // 如果所有條件都滿足，顯示來源
+              if (!lastMessage || lastMessage.role !== 'assistant') return null;
+
+              // 確保 sources 存在且為數組
+              const sources = Array.isArray(lastMessage.sources) ? lastMessage.sources : [];
+              if (sources.length === 0) return null;
+
               return (
                 <div className="max-w-3xl mx-auto mt-2">
-                  <details className="bg-white rounded-xl shadow-sm border border-purple-100">
-                    <summary className="px-4 py-3 text-sm cursor-pointer hover:bg-purple-50 transition-colors rounded-xl flex items-center justify-between">
+                  <details className="bg-gray-50 rounded-lg border border-gray-200">
+                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <svg className="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                          <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                         </svg>
-                        <span className="font-medium text-gray-700">引用來源 ({lastMessage.sources.length})</span>
+                        <span>引用來源</span>
+                        <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
+                          {sources.length}
+                        </span>
                       </div>
                     </summary>
-                    <div className="divide-y divide-purple-100">
-                      {lastMessage.sources.map((source, sourceIndex) => {
-                        // 清理和格式化來源內容
-                        const cleanContent = source.content
-                          .replace(/\\n/g, '\n')  // 處理換行符
-                          .replace(/\\"/g, '"')   // 處理引號
-                          .replace(/\\\\/g, '\\') // 處理反斜線
-                          .trim();
+                    <div className="divide-y divide-gray-200">
+                      {sources.map((source, index) => {
+                        // 安全地獲取來源資訊
+                        const sourceContent = source.content || '無內容';
+                        const sourcePath = source.metadata?.source || '未知來源';
+                        const fileName = sourcePath.split('/').pop() || '未知文件';
+                        const pageNumber = source.metadata?.page || source.page_info?.match(/第(\d+)頁/)?.[1];
+                        const score = source.metadata?.score || source.score;
 
                         return (
-                          <div key={sourceIndex} className="p-4 hover:bg-purple-50/30 transition-colors">
-                            <div className="flex justify-between items-start mb-3">
+                          <div key={index} className="p-4 hover:bg-gray-50 transition-colors">
+                            <div className="flex justify-between items-start mb-2">
                               <div className="flex items-center space-x-2">
-                                <svg className="w-5 h-5 text-purple-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                                   <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                <span className="font-medium text-gray-800">
-                                  {source.metadata?.source ? source.metadata.source.split('/').pop() : '未知文件'}
+                                <span className="font-medium text-gray-900">
+                                  {fileName}
                                 </span>
                               </div>
-                              {source.metadata?.page !== undefined && (
-                                <span className="text-sm text-purple-600 bg-purple-50 px-3 py-1 rounded-full font-medium">
-                                  第 {source.metadata.page} 頁
-                                </span>
-                              )}
+                              <div className="flex items-center space-x-2">
+                                {score !== undefined && (
+                                  <span className="text-xs text-gray-500">
+                                    相關度: {(score * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                                {pageNumber && (
+                                  <span className="text-sm bg-purple-50 text-purple-600 px-2.5 py-0.5 rounded-full">
+                                    第 {pageNumber} 頁
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="text-sm text-gray-600 bg-purple-50/30 p-4 rounded-lg">
-                              <p className="whitespace-pre-wrap leading-relaxed">{cleanContent}</p>
+                            <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
+                              <p className="whitespace-pre-wrap leading-relaxed">{sourceContent}</p>
                             </div>
                           </div>
                         );
