@@ -62,18 +62,12 @@ interface FileInfo {
 
 interface Source {
   content: string
-  metadata?: {
-    source?: string
+  metadata: {
+    source: string
     page?: number
-    score?: number
-    product_id?: string
-    chunk_info?: string  // 添加 chunk 信息
-    extraction_method?: string  // 添加提取方法
-    page_range?: string  // 添加頁面範圍
-    [key: string]: any
+    filename?: string
+    page_range?: string
   }
-  score?: number
-  page_info?: string
 }
 
 interface Message {
@@ -683,6 +677,28 @@ function App() {
     setError(null);
   };
 
+  // 添加來源解析的健壯性
+  const parseSourcesFromResponse = (text: string) => {
+    try {
+      // 尋找[SOURCES]...[/SOURCES]格式的來源信息
+      const sourceMatch = text.match(/\[SOURCES\](.*?)\[\/SOURCES\]/s);
+      if (sourceMatch && sourceMatch[1]) {
+        // 嘗試解析JSON，如果失敗則返回空數組
+        try {
+          const sources = JSON.parse(sourceMatch[1]);
+          return Array.isArray(sources) ? sources : [];
+        } catch (e) {
+          console.error("解析來源JSON失敗:", e);
+          return [];
+        }
+      }
+      return [];
+    } catch (error) {
+      console.error("解析來源時出錯:", error);
+      return [];
+    }
+  };
+
   return (
     <div className="flex h-screen bg-white">
       {/* 側邊欄 */}
@@ -922,93 +938,105 @@ function App() {
           {/* 消息列表 */}
           <div className="max-w-3xl mx-auto p-4 space-y-6">
             {messages.map((message, index) => (
-              <div key={index} className={`p-4 ${getMessageStyle(message.content, message.role)}`}>
-                <div 
-                  className="formatted-message max-w-3xl mx-auto"
-                  dangerouslySetInnerHTML={{ __html: formatText(message.content) }}
-                />
-                
-                {/* 來源信息顯示 */}
-                {message.sources && message.sources.length > 0 && (
-                  <div className="max-w-3xl mx-auto mt-2">
-                    <details className="bg-gray-50 rounded-lg border border-gray-200">
-                      <summary className="px-4 py-2 cursor-pointer hover:bg-gray-100">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                              <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                            </svg>
-                            <span className="text-sm font-medium">引用來源</span>
-                            <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
-                              {message.sources.length}
-                            </span>
-                          </div>
-                        </div>
-                      </summary>
-                      
-                      <div className="divide-y divide-gray-200">
-                        {message.sources.map((source, sourceIndex) => {
-                          const metadata = source.metadata || {};
-                          const sourceContent = source.content || '';
-                          const fileName = metadata.source?.split('/').pop() || '未知文件';
-                          const pageInfo = metadata.page_range || metadata.page || source.page_info;
-                          const chunkInfo = metadata.chunk_info || '';
-                          const extractionMethod = metadata.extraction_method || '';
-                          const score = metadata.score || source.score;
-
-                          return (
-                            <div key={sourceIndex} className="p-4 hover:bg-gray-50">
-                              <div className="flex flex-col space-y-2">
-                                {/* 文件信息行 */}
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center space-x-2">
-                                    <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                    </svg>
-                                    <span className="font-medium text-gray-900">{fileName}</span>
-                                  </div>
-                                  
-                                  {/* 標籤組 */}
-                                  <div className="flex items-center space-x-2">
-                                    {score !== undefined && (
-                                      <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full">
-                                        相關度: {(score * 100).toFixed(0)}%
-                                      </span>
-                                    )}
-                                    {pageInfo && (
-                                      <span className="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded-full">
-                                        {typeof pageInfo === 'number' ? `第 ${pageInfo} 頁` : pageInfo}
-                                      </span>
-                                    )}
-                                    {extractionMethod && (
-                                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                                        {extractionMethod}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                
-                                {/* Chunk 信息 */}
-                                {chunkInfo && (
-                                  <div className="text-xs text-gray-500">
-                                    {chunkInfo}
-                                  </div>
-                                )}
-                                
-                                {/* 內容 */}
-                                <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
-                                  <p className="whitespace-pre-wrap leading-relaxed">{sourceContent}</p>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
+              <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`flex max-w-md ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div className={`flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${
+                    message.role === 'user' ? 'bg-purple-600' : 'bg-gray-600'
+                  }`}>
+                    {message.role === 'user' ? '我' : 'AI'}
                   </div>
-                )}
+                  <div className={`mx-2 px-4 py-2 rounded-lg ${
+                    message.role === 'user' 
+                      ? 'bg-purple-600 text-white' 
+                      : getMessageStyle(message.content, message.role)
+                  }`}>
+                    {message.role === 'assistant' ? (
+                      <div 
+                        className="text-sm formatted-message"
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatText(message.content) 
+                        }}
+                      />
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
+
+            {/* 消息來源 - 強化版，確保始終能顯示 */}
+            {(() => {
+              // 檢查消息數組
+              if (messages.length === 0) return null;
+              
+              // 獲取最後一條消息
+              const lastMessage = messages[messages.length - 1];
+              
+              // 確保消息來源始終可見
+              if (lastMessage.role !== 'assistant') return null;
+              
+              // 處理來源數據，確保即使格式不正確也能顯示
+              const sources = lastMessage.sources && Array.isArray(lastMessage.sources) 
+                ? lastMessage.sources
+                : [];
+              
+              // 即使沒有來源數據，也顯示一個空的來源區域框架
+              return (
+                <div className="max-w-3xl mx-auto mt-2">
+                  <details className="bg-gray-50 rounded-lg border border-gray-200" open={sources.length > 0}>
+                    <summary className="px-4 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-100 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <svg className="w-5 h-5 text-purple-500" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                          <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                        <span>引用來源</span>
+                        <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs">
+                          {sources.length || 0}
+                        </span>
+                      </div>
+                      <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </summary>
+                    <div className="divide-y divide-gray-200">
+                      {sources.length > 0 ? (
+                        // 顯示所有可用的來源
+                        sources.map((source, sourceIndex) => (
+                          <div key={sourceIndex} className="p-4 hover:bg-gray-50 transition-colors">
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-center space-x-2">
+                                <svg className="w-5 h-5 text-gray-400" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span className="font-medium text-gray-900">
+                                  {source.metadata?.source 
+                                    ? source.metadata.source.split('/').pop() 
+                                    : (source.metadata?.filename || '未知文件')}
+                                </span>
+                              </div>
+                              {(source.metadata?.page !== undefined || source.metadata?.page_range) && (
+                                <span className="text-sm bg-purple-50 text-purple-600 px-2.5 py-0.5 rounded-full">
+                                  {source.metadata.page_range || `第 ${source.metadata.page} 頁`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-100 shadow-sm">
+                              <p className="whitespace-pre-wrap leading-relaxed">{source.content}</p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        // 如果沒有來源信息，顯示提示
+                        <div className="p-4 text-center text-gray-500">
+                          <p>沒有找到相關來源資訊</p>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                </div>
+              );
+            })()}
 
             {/* 顯示加載動畫 */}
             {isLoading && (
