@@ -92,7 +92,6 @@ function App() {
   const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const [vectorStoreStats, setVectorStoreStats] = useState({
@@ -324,77 +323,42 @@ function App() {
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    
-    setIsLoading(true);
+    const uploadedFiles = e.target.files
+    if (!uploadedFiles) return
+
+    setIsLoading(true)
+    setError('正在處理文件...')
     let uploadSuccess = false;
-    
-    // 清除之前的錯誤
-    setError(null);
-    
-    // 處理每個選擇的文件
-    const selectedFiles = Array.from(e.target.files);
-    
-    for (const file of selectedFiles) {
-      // 生成臨時ID以便追蹤上傳狀態
-      const tempFileId = Math.random().toString(36).substring(2, 10);
+
+    for(let i = 0; i < uploadedFiles.length; i++) {
+      const file = uploadedFiles[i]
+      const uploadFormData = new FormData()
+      uploadFormData.append('file', file)
       
-      // 添加到文件列表(帶上傳狀態)
-      setFiles(prev => [...prev, {
+      // 添加一個臨時文件項，狀態為上傳中
+      const tempFileId = Date.now() + '_' + i; // 創建一個臨時ID
+      const tempFile: FileInfo = { 
         name: tempFileId,
         display_name: file.name,
         size: file.size,
         status: 'uploading'
-      }]);
+      };
+      
+      setFiles(prev => [...prev, tempFile]);
       
       try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // 添加處理選項
-        formData.append('use_openai_ocr', 'true');  // 是否使用OpenAI Vision
-        formData.append('page_by_page', 'true');    // 逐頁處理
-        formData.append('batch_size', '10');        // 批次大小
-        
-        // 顯示上傳進度
-        console.log(`開始上傳文件: ${file.name}`);
-        
-        // 執行上傳
-        const response = await axios.post(`${API_URL}/api/upload`, formData, {
+        // 直接調用 API 不保留 response 變數
+        await axios.post(`${API_URL}/api/upload`, uploadFormData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
         });
         
-        // 更新上傳成功的狀態
-        setFiles(prev => prev.map(f => {
-          if (f.name === tempFileId) {
-            const processedFile = {
-              ...f,
-              status: 'success'
-            };
-            // 延遲移除上傳狀態標記
-            setTimeout(() => {
-              setFiles(curr => curr.map(cf => {
-                if (cf.name === tempFileId) {
-                  const { status, ...rest } = cf;
-                  return rest;
-                }
-                return cf;
-              }));
-            }, 2000);
-            return processedFile;
-          }
-          return f;
-        }));
-        
+        // 上傳成功，移除臨時文件
+        setFiles(prev => prev.filter(f => f.name !== tempFileId));
         uploadSuccess = true;
-        console.log(`文件 ${file.name} 上傳成功:`, response.data);
-        
-        // 每個文件上傳成功後立即刷新知識庫統計
-        await loadVectorStoreStats();
       } catch (error) {
-        console.error(`文件 ${file.name} 上傳失敗:`, error);
+        console.error('文件上傳失敗:', error);
         
         // 更新文件狀態為錯誤
         setFiles(prev => prev.map(f => {
@@ -656,26 +620,17 @@ function App() {
   // 添加加載統計信息的函數
   const loadVectorStoreStats = async () => {
     try {
-      console.log('正在獲取知識庫統計信息...');
-      const response = await axios.get(`${API_URL}/api/vector-store/stats`);
-      console.log('獲取到知識庫統計信息:', response.data);
-      setVectorStoreStats(response.data);
+      const response = await axios.get(`${API_URL}/api/vector-store/stats`)
+      setVectorStoreStats(response.data)
     } catch (error) {
-      console.error('獲取知識庫統計失敗:', error);
+      console.error('獲取知識庫統計失敗:', error)
     }
   }
 
   // 在適當的時機加載統計信息
   useEffect(() => {
-    loadVectorStoreStats();
-    
-    // 每30秒自動更新一次知識庫統計
-    const intervalId = setInterval(() => {
-      loadVectorStoreStats();
-    }, 30000);
-    
-    return () => clearInterval(intervalId);
-  }, [files]); // 當文件列表變化時重新加載
+    loadVectorStoreStats()
+  }, [files]) // 當文件列表變化時重新加載
 
   // 新增/更新對話歷史
   const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
@@ -781,6 +736,75 @@ function App() {
             </div>
           </div>
 
+          {/* 已上傳文件列表 */}
+          {files.length > 0 && (
+            <div className="p-4 border-b border-gray-200">
+              <h2 className="text-sm font-medium mb-2 text-gray-700">已上傳檔案</h2>
+              <div className="max-h-40 overflow-y-auto">
+                <div className="space-y-1">
+                  {files.map((file, index) => (
+                    <div 
+                      key={index} 
+                      className={`flex items-center justify-between p-2 rounded text-sm ${
+                        file.status === 'error' 
+                          ? 'bg-red-50 border border-red-100' 
+                          : file.status === 'uploading' 
+                            ? 'bg-blue-50 border border-blue-100' 
+                            : 'bg-gray-100'
+                      }`}
+                    >
+                      <div className="flex flex-col flex-1 pr-2 overflow-hidden">
+                        <div className="flex items-center">
+                          {file.status === 'uploading' && (
+                            <div className="h-3 w-3 mr-1 rounded-full bg-blue-400 animate-pulse"></div>
+                          )}
+                          {file.status === 'error' && (
+                            <svg className="h-3 w-3 mr-1 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                          <span className="truncate text-gray-800">
+                            {file.display_name || file.name}
+                          </span>
+                        </div>
+                        
+                        {file.errorMessage && (
+                          <span className="text-xs text-red-500">{file.errorMessage}</span>
+                        )}
+                        
+                        {file.size && !file.status && (
+                          <span className="text-xs text-gray-500">
+                            {(file.size / 1024).toFixed(1)} KB
+                            {file.uploadTime && ` • ${new Date(file.uploadTime).toLocaleDateString()}`}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {!file.status || file.status === 'error' ? (
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="ml-2 text-gray-400 hover:text-red-400"
+                          disabled={isLoading}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      ) : file.status === 'uploading' ? (
+                        <div className="ml-2 text-blue-400">
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 對話歷史列表 */}
           <div className="flex-1 overflow-y-auto p-4">
             <h2 className="text-sm font-medium mb-2 text-gray-700">對話歷史</h2>
@@ -834,17 +858,6 @@ function App() {
               <p>文件數量: {vectorStoreStats.unique_files}</p>
               <p>文本塊數: {vectorStoreStats.total_chunks}</p>
               <p>狀態: {vectorStoreStats.is_empty ? '🔴 空' : '🟢 有資料'}</p>
-              
-              {/* 添加刷新按鈕 */}
-              <button 
-                onClick={loadVectorStoreStats}
-                className="mt-2 text-xs text-blue-500 hover:text-blue-700 flex items-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                刷新知識庫狀態
-              </button>
             </div>
           </div>
         </div>
