@@ -102,8 +102,7 @@ function App() {
     is_empty: true
   })
 
-  // 添加文件夾輸入 ref
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   // 載入歷史對話
@@ -320,6 +319,11 @@ function App() {
     // 如果沒有錯誤提示，清除錯誤狀態
     if (!files.some(f => f.status === 'error')) {
       setError(null);
+    }
+
+    // 重置 input 控件，允許再次選擇相同文件
+    if (folderInputRef.current) {
+      folderInputRef.current.value = ''
     }
   }
 
@@ -660,14 +664,6 @@ function App() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
                 <span className="mt-1 text-sm">選擇檔案</span>
-                <input type="file" className="hidden" accept=".txt,.pdf,.docx" multiple onChange={handleFileUpload} disabled={isLoading} />
-              </label>
-              
-              <label className="flex flex-col items-center justify-center px-4 py-2 text-sm text-blue-500 bg-white rounded-lg border border-blue-500 hover:bg-blue-50 cursor-pointer transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-                <span className="mt-1 text-sm">選擇資料夾</span>
                 <input 
                   type="file" 
                   ref={folderInputRef}
