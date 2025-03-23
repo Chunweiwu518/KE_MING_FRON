@@ -10,13 +10,19 @@ interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInpu
 // 文本格式化函數
 const formatText = (text: string): string => {
   // 檢查是否包含 [SOURCES] 標記
-  const sourcesMatch = text.match(/\[SOURCES\](.*?)\[\/SOURCES\]/s)
-  if (sourcesMatch) {
-    try {
-      // 移除 [SOURCES] 標記，只保留實際內容
-      text = text.replace(/\[SOURCES\].*?\[\/SOURCES\]/s, '').trim()
-    } catch (e) {
-      console.error('處理來源數據失敗:', e)
+  if (text.includes('[SOURCES]')) {
+    // 提取並解析來源數據
+    const sourcesMatch = text.match(/\[SOURCES\](.*?)\[\/SOURCES\]/s);
+    if (sourcesMatch) {
+      try {
+        const sourcesData = JSON.parse(sourcesMatch[1]);
+        // 格式化來源數據
+        return sourcesData.map((source: Source) => {
+          return `來源：${source.metadata.source}\n${source.content}`;
+        }).join('\n\n');
+      } catch (e) {
+        console.error('解析來源數據失敗:', e);
+      }
     }
   }
 
@@ -167,7 +173,10 @@ function App() {
     e.preventDefault()
     if (!input.trim()) return
 
+    // 保存當前的輸入內容，因為之後會清空輸入框
     const currentInput = input.trim()
+    
+    // 防止提交時重複處理
     setInput('')
     setIsLoading(true)
     setError(null)
@@ -208,76 +217,124 @@ function App() {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      let conversationProcessed = false
+      // 表示我們處理過這個對話的請求，避免重複保存
+      let conversationProcessed = false;
+
       const reader = response.body?.getReader()
-      let accumulatedContent = ''
-      let currentAssistantMessage: Message = {
-        role: 'assistant',
-        content: '',
-        sources: []
+      if (!reader) {
+        throw new Error('無法獲取響應流')
       }
 
-      while (reader) {
-        const { value, done } = await reader.read()
+      // 創建一個暫存的助手回應和來源
+      let tempResponse = ''
+      let sources: Source[] = []
+      
+      // 創建文本解碼器
+      const decoder = new TextDecoder()
+
+      // 處理流式數據
+      while (true) {
+        const { done, value } = await reader.read()
         if (done) break
-
-        // 解碼收到的數據
-        const chunk = new TextDecoder().decode(value)
-        const lines = chunk.split('\n')
-
+        
+        // 將二進制數據解碼為文本
+        const text = decoder.decode(value, { stream: true })
+        
+        // 處理SSE格式的數據行
+        const lines = text.split('\n\n')
         for (const line of lines) {
-          if (!line.trim()) continue
-
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
+          if (!line.startsWith('data: ')) continue
+          
+          const data = line.substring(6) // 去掉 "data: " 前綴
+          
+          // 檢測特殊標記
+          if (data.startsWith('[SOURCES]') && data.endsWith('[/SOURCES]')) {
+            // 解析來源數據
+            const sourcesData = data.replace('[SOURCES]', '').replace('[/SOURCES]', '')
             try {
-              const parsedData = JSON.parse(data)
-              
-              // 處理來源數據
-              if (parsedData.sources && Array.isArray(parsedData.sources)) {
-                currentAssistantMessage.sources = parsedData.sources.map((source: any) => ({
-                  content: source.content,
-                  metadata: {
-                    source: source.metadata.source,
-                    page: source.metadata.page
+              sources = JSON.parse(sourcesData)
+            } catch (e) {
+              console.error('解析來源數據失敗:', e)
+            }
+          } 
+          // 檢測錯誤信息
+          else if (data.startsWith('[ERROR]') && data.endsWith('[/ERROR]')) {
+            const errorMsg = data.replace('[ERROR]', '').replace('[/ERROR]', '')
+            setError(`聊天請求失敗: ${errorMsg}`)
+            break
+          }
+          // 檢測結束標記
+          else if (data === '[DONE]') {
+            // 更新最終的助手消息，包括來源
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse,
+                    sources: sources
                   }
-                }))
-              }
-
-              // 處理文本內容
-              if (parsedData.content) {
-                accumulatedContent += parsedData.content
-                currentAssistantMessage.content = accumulatedContent
-
-                // 更新消息
-                setMessages(prev => {
-                  const newMessages = [...prev]
-                  newMessages[newMessages.length - 1] = {
-                    ...currentAssistantMessage,
-                    content: accumulatedContent
-                  }
-                  return newMessages
-                })
-
-                // 如果是新對話且有內容，保存對話歷史
-                if (isNewChat && !conversationProcessed && accumulatedContent) {
-                  await saveOrUpdateChatHistory(
-                    currentChatId,
-                    accumulatedContent,
-                    [...messages, newMessage, currentAssistantMessage]
-                  )
-                  conversationProcessed = true
+                  break
                 }
               }
-            } catch (e) {
-              console.error('解析數據失敗:', e)
-            }
+              
+              // 只有在這是新對話且尚未處理過時，才保存歷史
+              if (isNewChat && !conversationProcessed && updatedMessages.length >= 2) {
+                // 標記為已處理
+                conversationProcessed = true;
+                console.log('流處理完成，準備保存對話歷史');
+                
+                // 使用setTimeout確保當前狀態更新完畢後再保存歷史
+                setTimeout(() => {
+                  // 再次檢查沒有currentChatId才創建新對話
+                  if (!currentChatId) {
+                    saveOrUpdateChatHistory(
+                      updatedMessages, 
+                      currentInput.slice(0, 20) + "..."
+                    );
+                  }
+                }, 100);
+              }
+              
+              return updatedMessages
+            })
+            break
+          } 
+          // 一般情況：處理正常的字符
+          else {
+            tempResponse += data
+            // 更新助手消息的內容
+            setMessages(prev => {
+              const updatedMessages = [...prev]
+              // 尋找並更新最新的助手消息
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                if (updatedMessages[i].role === 'assistant') {
+                  updatedMessages[i] = {
+                    ...updatedMessages[i],
+                    content: tempResponse
+                  }
+                  break
+                }
+              }
+              return updatedMessages
+            })
+
+            // 增加一個小延遲再滾動，確保DOM已更新
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+            }, 10);
           }
         }
       }
     } catch (error) {
-      console.error('請求失敗:', error)
-      setError('發送消息失敗')
+      console.error('Chat error:', error)
+      if (axios.isAxiosError(error)) {
+        setError(`聊天請求失敗: ${error.response?.data?.detail || error.message}`)
+      } else {
+        setError('發送訊息時發生未知錯誤')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -593,36 +650,40 @@ function App() {
     loadVectorStoreStats()
   }, [files]) // 當文件列表變化時重新加載
 
-  // 保存或更新對話歷史的函數
-  const saveOrUpdateChatHistory = async (
-    chatId: string | null,
-    content: string,
-    messages: Message[]
-  ) => {
+  // 新增/更新對話歷史
+  const saveOrUpdateChatHistory = async (messages: Message[], title?: string) => {
     try {
-      const title = content.split('\n')[0].slice(0, 50)
-      const chatHistory = {
-        id: chatId || Date.now().toString(),
-        title,
-        messages,
-        createdAt: new Date().toISOString()
-      }
-
-      if (chatId) {
-        // 更新現有對話
-        await axios.put(`${API_URL}/api/history/${chatId}`, chatHistory)
+      // 如果當前已經有對話ID，且非新對話，則跳過保存
+      if (currentChatId) {
+        console.log('已有對話ID，跳過創建新歷史:', currentChatId);
+        return null;
       } else {
-        // 創建新對話
-        const response = await axios.post(`${API_URL}/api/history`, chatHistory)
-        setCurrentChatId(response.data.id)
+        console.log('創建新對話歷史');
+        return await createNewChatHistory(messages, title);
       }
-
-      // 重新獲取對話歷史
-      await fetchChatHistories()
     } catch (error) {
-      console.error('保存對話歷史失敗:', error)
+      console.error('保存對話歷史失敗:', error);
+      return null;
     }
-  }
+  };
+
+  // 創建新的對話歷史
+  const createNewChatHistory = async (messages: Message[], title?: string) => {
+    try {
+      console.log('開始創建新對話歷史, 訊息數量:', messages.length);
+      const historyResponse = await axios.post(`${API_URL}/api/history`, {
+        messages: messages,
+        title: title
+      });
+      console.log('對話歷史創建成功, ID:', historyResponse.data.id);
+      setCurrentChatId(historyResponse.data.id);
+      await fetchChatHistories(); // 重新獲取對話列表
+      return historyResponse.data;
+    } catch (error) {
+      console.error('創建對話歷史失敗:', error);
+      return null;
+    }
+  };
 
   // 新對話按鈕
   const startNewChat = () => {
