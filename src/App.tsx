@@ -7,11 +7,11 @@ interface ExtendedInputHTMLAttributes extends React.InputHTMLAttributes<HTMLInpu
   directory?: string;
 }
 
-// 文本格式化函數
+// 修改文本格式化函數，使回答更自然
 const formatText = (text: string): string => {
   // 先進行基本的清理
   let formattedText = text
-    // 移除控制字符 (使用 Unicode 範圍而不是 hex)
+    // 移除控制字符
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
     // 處理可能的 Unicode 轉義序列
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
@@ -19,22 +19,35 @@ const formatText = (text: string): string => {
     .replace(/\\([^u])/g, '$1')
     // 保留換行符
     .replace(/\n/g, '<br/>')
-    // 替換標準的分隔符為HTML換行和列表項
-    .replace(/-\s?\*\*([^*]+)\*\*:\s?/g, '<li><strong>$1</strong>: ')
-    .replace(/\*\*([^*]+)\*\*:/g, '<strong>$1</strong>:')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    // 處理冒號後面的內容
-    .replace(/(\d+)x(\d+)/g, '$1×$2')
-    // 確保適當的列表包裹
-    .replace(/<li>/g, '<li class="mb-2 list-disc ml-4">')
-    // 讓產品標題更明顯
-    .replace(/(HK-\d+的產品資料如下：)/g, '<div class="text-lg font-medium my-2">$1</div>')
+    
+    // 優化產品資訊格式
+    .replace(/型號：\s*([\w-]+)/g, '<span class="text-purple-700 font-medium">$1</span>')
+    .replace(/([\d.]+)mAh/g, '<span class="whitespace-nowrap">$1 mAh</span>')
+    .replace(/(\d+)x(\d+)/g, '<span class="whitespace-nowrap">$1×$2</span>')
+    .replace(/(\d+)lm/g, '<span class="whitespace-nowrap">$1 流明</span>')
+    
+    // 產品名稱突出顯示
+    .replace(/(EDS-G\d+|HK-\d+)/g, '<span class="font-semibold text-purple-800">$1</span>')
+    
+    // 價格突出顯示
+    .replace(/售價：\$(\d+)/g, '售價：<span class="text-red-600 font-medium">$$$1</span>')
+    .replace(/建議售價[：:]\s*\$(\d+)/g, '建議售價：<span class="text-red-600 font-medium">$$$1</span>')
+    
+    // 尺寸和包裝數量格式化
+    .replace(/尺寸[：:]\s*([^，,；;]+)/g, '尺寸：<span class="text-gray-700">$1</span>')
+    .replace(/裝箱數[：:]\s*(\d+)/g, '裝箱數：<span class="text-gray-700">$1</span>')
+    
+    // 轉換例項格式為更自然的段落
+    .replace(/例如：/g, '<p class="mt-2 italic text-gray-600">例如：</p>')
+    
+    // 美化清單
+    .replace(/[•·]|(-\s)/g, '<span class="inline-block w-2 h-2 bg-purple-400 rounded-full mr-2"></span> ')
 
-  // 檢查是否有列表項，如果有則添加ul標籤
-  if (formattedText.includes('<li>')) {
-    formattedText = formattedText.replace(/<li>(.+?)(?=<li>|$)/g, '<ul><li>$1</ul>')
-    // 修復嵌套的ul標籤
-    formattedText = formattedText.replace(/<\/ul><ul>/g, '')
+  // 讓產品介紹有卡片效果
+  if (formattedText.includes('產品資料') || formattedText.includes('商品名稱')) {
+    formattedText = `<div class="bg-gradient-to-r from-white to-purple-50 rounded-lg p-4 border border-purple-100">
+      ${formattedText}
+    </div>`
   }
 
   return formattedText
@@ -46,11 +59,7 @@ const getMessageStyle = (content: string, role: 'user' | 'assistant'): string =>
     return 'bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-sm'
   }
   
-  if (content.includes('產品資料如下') || content.includes('商品名稱')) {
-    return 'bg-gradient-to-br from-gray-50 to-gray-100 text-gray-800 product-info shadow-sm'
-  }
-  
-  return 'bg-gradient-to-br from-gray-50 to-gray-100 text-gray-800 shadow-sm'
+  return 'bg-gradient-to-br from-gray-50 to-gray-100 text-gray-800 shadow-sm leading-relaxed'
 }
 
 interface FileInfo {
@@ -104,6 +113,7 @@ function App() {
     files: [],
     is_empty: true
   })
+  const [showWelcomePage, setShowWelcomePage] = useState(true)
 
   // 載入歷史對話
   useEffect(() => {
@@ -647,12 +657,13 @@ function App() {
     setInput('')
     setError(null)
     document.title = 'RAG - 新對話'
+    setShowWelcomePage(false) // 關閉歡迎頁面
   }
 
-  // 修改消息渲染組件
+  // 修改消息渲染組件，讓回答更自然
   const MessageContent: React.FC<{ message: Message }> = ({ message }) => {
     const [isSourcesVisible, setIsSourcesVisible] = useState(false);
-
+    
     return (
       <div className="w-full">
         <div 
@@ -661,12 +672,12 @@ function App() {
         />
         
         {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-          <div className="mt-3">
+          <div className="mt-2">
             <button
               onClick={() => setIsSourcesVisible(!isSourcesVisible)}
               className="text-sm text-purple-600 hover:text-purple-800 flex items-center transition-colors duration-200"
             >
-              <span className="font-medium">{isSourcesVisible ? '隱藏來源' : '查看來源'}</span>
+              <span className="font-medium">{isSourcesVisible ? '隱藏參考資料' : '查看參考資料'}</span>
               <svg
                 className={`ml-1 h-4 w-4 transform transition-transform duration-200 ${
                   isSourcesVisible ? 'rotate-180' : ''
@@ -680,7 +691,8 @@ function App() {
             </button>
             
             {isSourcesVisible && (
-              <div className="mt-3 space-y-3">
+              <div className="mt-3 space-y-3 animate-fade-in">
+                <div className="text-xs text-gray-500 mb-1">參考了以下資料：</div>
                 {message.sources.map((source, index) => (
                   <div key={index} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
                     <div className="text-gray-500 text-sm mb-2 flex items-center">
@@ -723,87 +735,142 @@ function App() {
 
   const deleteAllChats = async () => {
     try {
-      await axios.delete(`${API_URL}/api/history/all`)
+      // 使用更明確的路徑
+      await axios.delete(`${API_URL}/api/history/clear_all`)
       startNewChat()
       await fetchChatHistories()
     } catch (error) {
       console.error('刪除所有對話失敗:', error)
-      setError('刪除所有對話失敗')
+      if (axios.isAxiosError(error)) {
+        const statusCode = error.response?.status
+        const errorDetail = error.response?.data?.detail || error.message
+        setError(`刪除所有對話失敗 (${statusCode}): ${errorDetail}`)
+      } else {
+        setError('刪除所有對話失敗')
+      }
     }
   }
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      {/* 側邊欄 */}
-      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white border-r border-gray-200 flex flex-col`}>
-        <div className="p-4 border-b flex justify-between items-center">
-          <h2 className="text-lg font-semibold">RAG 聊天助手</h2>
-          {chatHistories.length > 0 && (
-            <button
-              onClick={deleteAllChats}
-              className="text-red-600 hover:text-red-800 text-sm font-medium transition-colors duration-200"
-            >
-              清空對話
-            </button>
-          )}
-        </div>
-        
-        {/* 上傳區域 */}
-        <div className="p-4 border-b">
-          <button
-            onClick={() => document.getElementById('fileInput')?.click()}
-            className="w-full bg-purple-600 text-white rounded-lg px-4 py-2 hover:bg-purple-700"
-          >
-            選擇檔案
-          </button>
-          <input
-            id="fileInput"
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-        </div>
-
-        {/* 對話歷史列表 */}
-        <div className="flex-1 overflow-y-auto">
-          {chatHistories.map((chat) => (
-            <div
-              key={chat.id}
-              onClick={() => loadChatHistory(chat.id)}
-              className={`p-4 hover:bg-gray-50 ${
-                currentChatId === chat.id ? 'bg-purple-50 border-l-4 border-purple-600' : ''
-              } group relative`}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{chat.title}</div>
-                  <div className="text-xs text-gray-500">
-                    {new Date(chat.createdAt).toLocaleString()}
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => deleteChat(chat.id, e)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 rounded-full"
-                >
-                  <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* 新對話按鈕 */}
-        <div className="p-4 border-t">
+  // 將狀態顯示組件從歡迎頁面中移除，並修改WelcomePage組件
+  const WelcomePage = () => {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="max-w-2xl w-full bg-white rounded-2xl shadow-lg p-8">
+          <h1 className="text-3xl font-bold text-purple-800 text-center mb-6">歡迎來到可名小幫手</h1>
+          
+          <div className="mb-8 text-center">
+            <p className="text-gray-600 text-lg mb-4">我可以協助您查詢公司資料庫中的產品與服務資訊</p>
+            <p className="text-gray-500">請點擊下方按鈕開始對話</p>
+          </div>
+          
           <button
             onClick={startNewChat}
-            className="w-full bg-gray-200 text-gray-700 rounded-lg px-4 py-2 hover:bg-gray-300"
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 px-6 rounded-xl font-medium text-lg transition-colors duration-200 shadow-md hover:shadow-lg"
           >
             開始新對話
           </button>
         </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      {/* 側邊欄 - 添加 overflow-hidden 和條件渲染 */}
+      <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden`}>
+        {/* 只在側邊欄開啟時渲染內容 */}
+        {sidebarOpen && (
+          <>
+            <div className="p-4 border-b flex justify-between items-center">
+              <h2 className="text-lg font-semibold">RAG 聊天助手</h2>
+              {chatHistories.length > 0 && (
+                <button
+                  onClick={deleteAllChats}
+                  className="text-red-600 hover:text-red-800 text-sm font-medium transition-colors duration-200"
+                >
+                  清空對話
+                </button>
+              )}
+            </div>
+            
+            {/* 上傳區域 */}
+            <div className="p-4 border-b">
+              <button
+                onClick={() => document.getElementById('fileInput')?.click()}
+                className="w-full bg-purple-600 text-white rounded-lg px-4 py-2 hover:bg-purple-700"
+              >
+                選擇檔案
+              </button>
+              <input
+                id="fileInput"
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </div>
+
+            {/* 對話歷史列表 */}
+            <div className="flex-1 overflow-y-auto">
+              {chatHistories.map((chat) => (
+                <div
+                  key={chat.id}
+                  onClick={() => loadChatHistory(chat.id)}
+                  className={`p-4 hover:bg-gray-50 ${
+                    currentChatId === chat.id ? 'bg-purple-50 border-l-4 border-purple-600' : ''
+                  } group relative`}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{chat.title}</div>
+                      <div className="text-xs text-gray-500">
+                        {new Date(chat.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => deleteChat(chat.id, e)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 hover:bg-red-100 rounded-full"
+                    >
+                      <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 新對話按鈕 */}
+            <div className="p-4 border-t">
+              <button
+                onClick={startNewChat}
+                className="w-full bg-gray-200 text-gray-700 rounded-lg px-4 py-2 hover:bg-gray-300"
+              >
+                開始新對話
+              </button>
+            </div>
+            
+            {/* 知識庫狀態顯示 - 放在側邊欄底部 */}
+            <div className="p-4 border-t bg-purple-50">
+              <h3 className="text-sm font-medium text-purple-700 mb-2">知識庫狀態</h3>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-white rounded p-2 shadow-sm">
+                  <div className="text-gray-500">文件數量</div>
+                  <div className="text-lg font-bold text-purple-600">{vectorStoreStats.unique_files}</div>
+                </div>
+                <div className="bg-white rounded p-2 shadow-sm">
+                  <div className="text-gray-500">知識片段</div>
+                  <div className="text-lg font-bold text-purple-600">{vectorStoreStats.total_chunks}</div>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-center py-1 rounded bg-white">
+                <span className={`font-medium ${vectorStoreStats.is_empty ? 'text-orange-500' : 'text-green-600'}`}>
+                  {vectorStoreStats.is_empty ? '尚未初始化' : '已就緒'}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       
       {/* 主要聊天區域 */}
@@ -811,7 +878,7 @@ function App() {
         {/* 頂部導航欄 */}
         <div className="h-16 bg-white border-b border-gray-200 flex items-center px-4 shadow-sm">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={toggleSidebar}
             className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
           >
             <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -821,57 +888,64 @@ function App() {
           <h1 className="ml-4 text-xl font-medium text-gray-800">RAG 知識庫問答</h1>
         </div>
 
-        {/* 消息列表 */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
-            >
-              <div className={`max-w-2xl ${message.role === 'user' ? 'ml-12' : 'mr-12'}`}>
-                <MessageContent message={message} />
+        {/* 根據狀態顯示歡迎頁面或聊天界面 */}
+        {showWelcomePage ? (
+          <WelcomePage />
+        ) : (
+          <>
+            {/* 消息列表 */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
+                >
+                  <div className={`max-w-2xl ${message.role === 'user' ? 'ml-12' : 'mr-12'}`}>
+                    <MessageContent message={message} />
+                  </div>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* 錯誤提示 */}
+            {error && (
+              <div className="px-6 py-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {error}
+                </div>
               </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
+            )}
 
-        {/* 錯誤提示 */}
-        {error && (
-          <div className="px-6 py-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm">
-            <div className="flex items-center">
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {error}
+            {/* 輸入區域 */}
+            <div className="bg-white border-t border-gray-200 p-6">
+              <form onSubmit={handleSubmit} className="flex space-x-4">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="輸入問題..."
+                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-shadow duration-200"
+                  disabled={isLoading}
+                />
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
+                    isLoading
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-purple-600 text-white hover:bg-purple-700 hover:shadow-lg'
+                  }`}
+                >
+                  {isLoading ? '處理中...' : '發送'}
+                </button>
+              </form>
             </div>
-          </div>
+          </>
         )}
-
-        {/* 輸入區域 */}
-        <div className="bg-white border-t border-gray-200 p-6">
-          <form onSubmit={handleSubmit} className="flex space-x-4">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="輸入問題..."
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-shadow duration-200"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading}
-              className={`px-6 py-3 rounded-xl font-medium transition-all duration-200 ${
-                isLoading
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-purple-600 text-white hover:bg-purple-700 hover:shadow-lg'
-              }`}
-            >
-              {isLoading ? '處理中...' : '發送'}
-            </button>
-          </form>
-        </div>
       </div>
     </div>
   )
